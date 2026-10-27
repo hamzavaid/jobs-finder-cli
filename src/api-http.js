@@ -33,13 +33,14 @@ export function createApiClient({retries = 2,random = Math.random,fetchImpl = gl
       if (slot > now()) await sleep(slot - now());
       signal?.throwIfAborted();
       const controller = new AbortController();
-      const combined = signal ? AbortSignal.any([controller.signal,signal]) : controller.signal;
+      const callerAborted = () => controller.abort(signal.reason);
+      signal?.addEventListener('abort',callerAborted,{once:true});
       let timer;
       const timeout = new Promise((_,reject) => {timer = setTimeout(() => {controller.abort();reject(new AccessError(`${host}: API request timed out (${timeoutMs} ms).`));},timeoutMs);});
       let response;
       try {
         return await Promise.race([(async () => {
-          response = await fetchImpl(url.toString(),{method,headers:{Accept:json ? 'application/json' : 'text/plain,application/json','User-Agent':'jobs-finder-cli/2.0 (public posting APIs and URL indexes)'},signal:combined,redirect:'error'});
+          response = await fetchImpl(url.toString(),{method,headers:{Accept:json ? 'application/json' : 'text/plain,application/json','User-Agent':'jobs-finder-cli/2.0 (public posting APIs and URL indexes)'},signal:controller.signal,redirect:'error'});
           if (!response.ok) {
             const error = new AccessError(`${host}: HTTP ${response.status}${response.status === 429 ? ' (rate limited)' : [401,403].includes(response.status) ? ' (access restricted)' : ''}.`,response.status);
             error.retryAfter = retryAfterMs(response.headers?.get?.('retry-after'),now());
@@ -74,7 +75,7 @@ export function createApiClient({retries = 2,random = Math.random,fetchImpl = gl
         controller.abort();await response?.body?.cancel?.().catch(() => {});
         if (signal?.aborted) throw signal.reason;
         throw error instanceof AccessError ? error : Object.assign(new AccessError(`${host}: network request failed: ${error.message}`),{transient:true});
-      } finally {clearTimeout(timer);}
+      } finally {clearTimeout(timer);signal?.removeEventListener('abort',callerAborted);}
     });
   }
   async function request(value,options) {

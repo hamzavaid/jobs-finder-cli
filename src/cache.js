@@ -40,7 +40,7 @@ export class CacheManager {
     return join(this.root,kind,stableKey(key) + '.json');
   }
   fresh(record) {return !!record && (record.expiresAt === null || Date.parse(record.expiresAt) > this.now());}
-  usableStale(record) {return !!record && this.now() - Date.parse(record.updatedAt) <= CACHE_TTL.stale;}
+  usableStale(record) {return !!record && this.now() - Date.parse(record.data?.lastSuccessfulFetchAt || record.updatedAt) <= CACHE_TTL.stale;}
   async rawRead(kind,key) {
     const path = this.path(kind,key);
     try {

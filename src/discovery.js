@@ -65,7 +65,7 @@ export async function validateBoard(provider,board,http) {
     return {status:'valid',method:'GET'};
   } catch (error) {
     if (error.name === 'AbortError') throw error;
-    return {status:[404,410].includes(error.status) ? 'invalid' : 'temporary-error',error:error.message,httpStatus:error.status || null};
+    return {status:[404,410].includes(error.status) ? 'invalid' : 'temporary-error',error:error.message,httpStatus:error.status || null,retryAt:error.retryAt || null};
   }
 }
 export function mergeInventory(previous,next) {
@@ -85,7 +85,7 @@ export class DiscoveryManager {
     const inventory = structuredClone(previous || {provider:provider.name,boards:[],cursors:{},revision:randomUUID()});
     if (inventory.nextDiscoveryAt && time(inventory.nextDiscoveryAt) > this.now()) {
       this.report(provider.name,'cached boards loaded');
-      return {inventory,errors:[],complete:!!inventory.lastFullAt};
+      return {inventory,errors:inventory.lastDiscoveryErrors || [],complete:inventory.coverageComplete === true};
     }
     this.report(provider.name,'discovering company boards');
     const errors = [], candidates = new Map(inventory.boards.map(board => [boardKey(board),board]));
@@ -98,7 +98,7 @@ export class DiscoveryManager {
       // A completed previous pass starts again when its TTL expires.
       const completedPass = inventory[mode === 'full' ? 'lastFullAt' : 'lastRecentAt'];
       const state = old.done && time(old.completedAt) <= time(completedPass) ? {} : old;
-      if (state.done) continue;
+      if (state.done) {archiveSucceeded = true;continue;}
       let resumeKey = state.resumeKey || null, done = false;
       const from = state.from || (mode === 'recent' ? new Date(this.now() - 30 * DAY).toISOString().slice(0,10).replaceAll('-','') : null);
       try {
@@ -125,26 +125,33 @@ export class DiscoveryManager {
     const due = [...candidates.values()].filter(board => board.status !== 'valid' || this.now() - time(board.lastValidatedAt) >= DISCOVERY_TTL.validation)
       .filter(board => !board.retryAt || time(board.retryAt) <= this.now()).slice(0,this.maxValidations);
     // Fixed worker pool; validation never submits the entire inventory at once.
-    let index = 0;
+    let index = 0,blocked = false;
     await Promise.all(Array.from({length:Math.min(2,due.length)},async () => {
-      while (index < due.length) {
+      while (index < due.length && !blocked) {
         this.signal?.throwIfAborted();
         const board = due[index++], validation = await validateBoard(provider,board,this.http);
         const stamp = new Date(this.now()).toISOString();
         board.validationAttemptAt = stamp; board.validation = validation;
         if (validation.status === 'valid') {board.status = 'valid'; board.lastValidatedAt = stamp; board.retryAt = null;}
         else if (validation.status === 'invalid') {board.status = 'invalid'; board.invalidAt = stamp; board.retryAt = new Date(this.now() + DISCOVERY_TTL.validation).toISOString();}
-        else {board.retryAt = new Date(this.now() + 15 * 60000).toISOString(); board.lastError = validation.error;}
+        else {
+          board.retryAt = validation.retryAt || new Date(this.now() + 15 * 60000).toISOString();board.lastError = validation.error;
+          if ([401,403,429].includes(validation.httpStatus)) {blocked = true;inventory.providerRetryAt = board.retryAt;}
+        }
       }
     }));
     inventory.boards = [...candidates.values()];
     const stamp = new Date(this.now()).toISOString();
     inventory.lastAttemptAt = stamp;
     if (allDone && archiveSucceeded) {inventory[mode === 'full' ? 'lastFullAt' : 'lastRecentAt'] = stamp;}
+    inventory.coverageComplete = allDone && archiveSucceeded && !inventory.boards.some(board => board.status === 'pending');
+    inventory.lastDiscoveryErrors = errors;
     inventory.nextDiscoveryAt = new Date(this.now() + (!archiveSucceeded ? 15 * 60000 : allDone ? DAY : 3600000)).toISOString();
-    const saved = await this.cache.update('inventory',provider.name,current => mergeInventory(current,inventory));
+    let saved;
+    try {saved = await this.cache.update('inventory',provider.name,current => mergeInventory(current,inventory));}
+    catch (error) {if (error.name === 'AbortError') throw error;errors.push(`Cache inventory write failed: ${error.message}`);saved = {data:inventory};}
     this.report(provider.name,`discovery ${allDone && archiveSucceeded ? 'completed' : 'partial'}; ${saved.data.boards.filter(b => b.status === 'valid').length} valid boards`);
-    return {inventory:saved.data,errors,complete:allDone && archiveSucceeded};
+    return {inventory:saved.data,errors,complete:inventory.coverageComplete};
   }
   addCandidate(candidates,value,provider,discoveredBy) {
     const candidate = extractBoard(value,provider);

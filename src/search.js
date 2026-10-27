@@ -2,6 +2,7 @@ import {providers} from './providers.js';
 import {searchProvider} from './provider-search.js';
 import {CollectionManager} from './collection.js';
 import {createApiClient} from './api-http.js';
+import {identifyCrossSourceDuplicates} from './dedup.js';
 export {fetchJob, findLinkedInJobs} from './linkedin.js';
 
 /** Execute selected providers concurrently; preserve selection order when interleaving. */
@@ -28,6 +29,9 @@ export async function findJobs(options, http, context = {}) {
     } catch (error) {context.report?.(site,error.name === 'AbortError' ? 'canceled' : 'provider failed');return {site,error};}
   }));
   await collection?.cache.flush();
+  if (collection?.cache.prune && !context.signal?.aborted) {
+    try {await collection.cache.prune();} catch (error) {context.report?.('Cache',`pruning deferred: ${error.message}`);}
+  }
   context.signal?.throwIfAborted();
   for (const {site,outcome,error} of outcomes) {
     if (error) {
@@ -52,6 +56,8 @@ export async function findJobs(options, http, context = {}) {
     }
     if (!added) break;
   }
-  await collection?.cache.flush();
-  return {jobs:merged, stats};
+  const duplicateHints = identifyCrossSourceDuplicates(merged);
+  stats.possibleCrossSourceDuplicates = duplicateHints.possible;
+  stats.duplicatesRemoved = outcomes.reduce((sum,item) => sum + (item.outcome?.stats.duplicatesRemoved || 0),0);
+  return {jobs:duplicateHints.jobs,stats};
 }

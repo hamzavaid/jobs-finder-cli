@@ -21,6 +21,8 @@ export function createHttpClient({delayMs = 1200, timeoutMs = 15000, retries = 2
       signal?.throwIfAborted();
       nextAllowed = now() + delayMs;
       const controller = new AbortController();
+      const callerAborted = () => controller.abort(signal.reason);
+      signal?.addEventListener('abort',callerAborted,{once:true});
       let timer;
       const timeout = new Promise((_, reject) => {
         timer = setTimeout(() => {
@@ -34,7 +36,7 @@ export function createHttpClient({delayMs = 1200, timeoutMs = 15000, retries = 2
           response = await fetchImpl(url, {
             headers: {'Accept':'text/html,application/xhtml+xml', 'Accept-Language':'en-US,en;q=0.8',
               'User-Agent':'jobs-cli/2.0 (public job listings reader; no browser automation)'},
-            signal:signal ? AbortSignal.any([controller.signal,signal]) : controller.signal, redirect:'follow'
+            signal:controller.signal, redirect:'follow'
           });
           if (response.url && /\/(?:authwall|checkpoint|login|signin|member\/profile\/login)(?:[/?]|$)/i.test(new URL(response.url).pathname)) throw new AccessError(`${host}: login or access checkpoint required.`);
           if ([401,403,429,999].includes(response.status)) throw new AccessError(`${host} returned HTTP ${response.status}; access is restricted. Use the official website.`, response.status);
@@ -51,7 +53,7 @@ export function createHttpClient({delayMs = 1200, timeoutMs = 15000, retries = 2
         const status = error.status || 0;
         const transient = !(error instanceof AccessError) || /timed out/.test(error.message) || [500,502,503,504].includes(status);
         if (!transient || attempt === retries) throw error instanceof AccessError ? error : new AccessError(`Network request failed from ${host}: ${error.message}`);
-      } finally {clearTimeout(timer);}
+      } finally {clearTimeout(timer);signal?.removeEventListener('abort',callerAborted);}
       await sleep(Math.max(delayMs, 1000 * (attempt + 1)));
     }
   }

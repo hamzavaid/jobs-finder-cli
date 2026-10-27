@@ -25,6 +25,11 @@ export function normalizeGreenhouse(raw, board) {
 }
 export const greenhouseProvider = {
   name:'Greenhouse', kind:'ats', domains:['boards.greenhouse.io','job-boards.greenhouse.io'], apiUrl:greenhouseUrl,
+  async fetchCompany(board,http) {
+    const data = await http.json(`https://boards-api.greenhouse.io/v1/boards/${assertBoard(board)}`);
+    if (typeof data?.name !== 'string' || !data.name.trim()) throw new Error('Greenhouse returned invalid board metadata.');
+    return clean(data.name);
+  },
   async fetchBoard(board, http, options = {}) {
     const data = await http.json(greenhouseUrl(board,{content:!!options.content}));
     if (!data || !Array.isArray(data.jobs)) throw new Error('Greenhouse returned an invalid jobs payload.');

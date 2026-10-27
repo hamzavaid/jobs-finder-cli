@@ -7,7 +7,7 @@ import {mapConcurrent} from './concurrency.js';
 
 export function searchCacheKey(options,provider) {
   const {search,company,location,dateSeconds,remote,workplace,experience,employment,under,verified,limit,pages,sort,details,strict,websites} = options;
-  return stableKey({provider,search:search.toLowerCase(),company:company.toLowerCase(),location:location.toLowerCase(),dateSeconds,remote,workplace,experience,employment,under,verified,limit,pages,sort,details,strict,websites:[...websites].sort()});
+  return stableKey({provider,search:search.toLowerCase().replace(/\s+/g,' '),company:company.toLowerCase().replace(/\s+/g,' '),location:location.toLowerCase().replace(/\s+/g,' '),dateSeconds,remote,workplace,experience,employment,under,verified,limit,pages,sort,details,strict,websites:[...websites].sort()});
 }
 export class CollectionManager {
   constructor({cache,http,signal,report = () => {},now = Date.now,maxBoards = 64,discoveryOptions = {}} = {}) {
@@ -16,7 +16,7 @@ export class CollectionManager {
     this.http = http || createApiClient({signal});
   }
   async find(provider,options) {
-    const stats = {...emptyStats(),boardsKnown:0,boardsVisited:0,cacheHits:0,staleBoards:0,complete:false,duplicatesRemoved:0,partialBoards:0};
+    const stats = {...emptyStats(),boardsKnown:0,boardsVisited:0,cacheHits:0,staleBoards:0,complete:false,duplicatesRemoved:0,partialBoards:0,failedBoards:0};
     const discovery = await new DiscoveryManager({cache:this.cache,http:this.http,signal:this.signal,report:this.report,now:this.now,...this.discoveryOptions}).ensure(provider);
     const inventory = discovery.inventory;
     stats.errors.push(...discovery.errors);
@@ -27,7 +27,7 @@ export class CollectionManager {
         const cached = await this.cache.read('postings',ref.key);
         return this.cache.fresh(cached) && cached.data.revision === ref.revision;
       },{signal:this.signal});
-      if (valid.every(Boolean)) {this.report(provider.name,'exact search cache loaded');return {jobs:exact.data.jobs,stats:{...exact.data.stats,cacheHits:exact.data.refs.length,exactCacheHit:true}};}
+      if (valid.every(Boolean)) {this.report(provider.name,'exact search cache loaded');return {jobs:exact.data.jobs,stats:{...exact.data.stats,errors:[...new Set([...exact.data.stats.errors,...discovery.errors])],complete:exact.data.stats.complete && discovery.complete,cacheHits:exact.data.refs.length,exactCacheHit:true}};}
     }
     const boards = inventory.boards.filter(board => board.status === 'valid' || board.status === 'pending');
     if (!boards.length) throw new Error(`${provider.name}: no validated boards available${discovery.errors.length ? '; ' + discovery.errors.join(' | ') : '; discovery or validation is incomplete'}.`);
@@ -36,7 +36,7 @@ export class CollectionManager {
     const snapshots = boards.map(board => ({board,key:`${provider.name}:${boardKey(board)}`}));
     // Read large posting shards only inside the two-worker loop, never all at once.
     snapshots.sort((a,b) => (Date.parse(a.board.lastJobFetchAt) || 0) - (Date.parse(b.board.lastJobFetchAt) || 0) || boardKey(a.board).localeCompare(boardKey(b.board)));
-    let refreshes = 0;
+    let refreshes = 0,providerBlocked = Date.parse(inventory.providerRetryAt) > this.now();
     this.report(provider.name,`fetching jobs: 0 / ${boards.length} boards`);
     await mapConcurrent(snapshots,2,async ({board,key:boardCacheKey}) => {
       const cached = await this.cache.read('postings',boardCacheKey);
@@ -45,20 +45,22 @@ export class CollectionManager {
       const contentNeeded = provider.name === 'Greenhouse' && options.details;
       const fresh = this.cache.fresh(cached) && (!contentNeeded || cached.data.content);
       if (fresh) stats.cacheHits++;
-      else if (refreshes >= this.maxBoards || (board.retryAt && Date.parse(board.retryAt) > this.now())) {
+      else if (providerBlocked || refreshes >= this.maxBoards || (board.retryAt && Date.parse(board.retryAt) > this.now())) {
         if (!cached || !this.cache.usableStale(cached)) return;
         stats.staleBoards++;
       } else {
         refreshes++;
         try {
+          if (options.company && provider.fetchCompany && !board.company) board.company = await provider.fetchCompany(board,this.http);
           const outcome = await provider.fetchBoard(board,this.http,{pages:options.pages,content:contentNeeded});
           stats.pages += outcome.pages;
-          const updated = {provider:provider.name,board,jobs:outcome.jobs,complete:outcome.complete,content:contentNeeded,
+          const fetchedAt = new Date(this.now()).toISOString();
+          const updated = {provider:provider.name,board,jobs:outcome.jobs.map(job => ({...job,lastObservedAt:fetchedAt})),lastSuccessfulFetchAt:outcome.complete ? fetchedAt : cached?.data.lastSuccessfulFetchAt || cached?.updatedAt || fetchedAt,complete:outcome.complete,content:contentNeeded,
             revision:stableKey(outcome.jobs.map(({fetchedAt,...job}) => job))};
           // A truncated fetch never replaces a complete board inventory.
           if (!outcome.complete && cached) {
             const jobs = new Map(cached.data.jobs.map(job => [job.id,job]));
-            for (const job of outcome.jobs) jobs.set(job.id,job);
+            for (const job of updated.jobs) jobs.set(job.id,job);
             updated.jobs = [...jobs.values()];updated.revision = stableKey(updated.jobs);
           }
           record = {data:updated,updatedAt:new Date(this.now()).toISOString(),expiresAt:new Date(this.now() + CACHE_TTL.postings).toISOString()};dirty = true;
@@ -66,7 +68,9 @@ export class CollectionManager {
           if (!outcome.complete) stats.errors.push(`${provider.name}: ${board.id}: partial board (${outcome.reason || 'pagination incomplete'}).`);
         } catch (error) {
           if (error.name === 'AbortError') throw error;
+          stats.failedBoards++;
           const invalid = [404,410].includes(error.status);
+          if ([401,403,429].includes(error.status)) {providerBlocked = true;inventory.providerRetryAt = error.retryAt || new Date(this.now() + 15 * 60000).toISOString();}
           changes.push({...board,status:invalid ? 'invalid' : board.status,lastError:error.message,validationAttemptAt:new Date(this.now()).toISOString(),retryAt:error.retryAt || new Date(this.now() + (invalid ? 7 * 86400000 : 15 * 60000)).toISOString()});
           stats.errors.push(`${provider.name}: ${board.id}: ${error.message}`);
           if (invalid || !cached || !this.cache.usableStale(cached)) return;
@@ -90,28 +94,36 @@ export class CollectionManager {
         const decision = engine.evaluate(job);
         if (!decision.match) {stats.rejected++;if (decision.unknowns.length) stats.unknownExcluded++;continue;}
         if (results.has(job.id)) stats.duplicatesRemoved++;
-        results.set(job.id,{...job,cacheStatus:this.cache.fresh(record) ? 'fresh' : 'stale',cacheFetchedAt:record.updatedAt});
+        results.set(job.id,{...job,cacheStatus:this.cache.fresh(record) && (!job.lastObservedAt || this.now() - Date.parse(job.lastObservedAt) < CACHE_TTL.postings) ? 'fresh' : 'stale',cacheFetchedAt:job.lastObservedAt || record.data.lastSuccessfulFetchAt || record.updatedAt});
         if (results.size > options.limit * 2) {
           const best = engine.sort([...results.values()]).slice(0,options.limit);results.clear();for (const row of best) results.set(row.id,row);
         }
       }
       if (dirty) {
         record.data.jobs = enriched;record.data.revision = stableKey(enriched.map(({fetchedAt,...job}) => job));
-        record = await this.cache.put('postings',boardCacheKey,record.data,{ttl:CACHE_TTL.postings});
+        const remaining = Math.max(0,Date.parse(record.expiresAt) - this.now());
+        try {record = await this.cache.put('postings',boardCacheKey,record.data,{ttl:remaining});}
+        catch (error) {if (error.name === 'AbortError') throw error;stats.errors.push(`${provider.name}: board cache write failed: ${error.message}`);}
       }
       refs.push({key:boardCacheKey,revision:record.data.revision});
       this.report(provider.name,`fetching jobs: ${stats.boardsVisited} / ${boards.length} boards`);
     },{signal:this.signal});
     if (stats.detailRequests >= 200) stats.errors.push(`${provider.name}: detail request budget reached; unmatched unknown attributes remain excluded.`);
-    if (changes.length) await this.cache.update('inventory',provider.name,current => mergeInventory(current,{...inventory,boards:changes}));
+    if (changes.length) {
+      try {await this.cache.update('inventory',provider.name,current => mergeInventory(current,{...inventory,boards:changes}));}
+      catch (error) {if (error.name === 'AbortError') throw error;stats.errors.push(`${provider.name}: inventory cache write failed: ${error.message}`);}
+    }
     stats.complete = discovery.complete && stats.boardsVisited === boards.length && !stats.staleBoards && !stats.partialBoards && !stats.errors.length;
     if (!stats.complete) stats.errors.push(`${provider.name}: partial coverage (${stats.boardsVisited}/${boards.length} known boards; ${stats.staleBoards} stale).`);
     if (!stats.boardsVisited) throw new Error(`${provider.name}: no board data could be collected. ${stats.errors.slice(0,3).join(' | ')}`);
     this.report(provider.name,'filtering and deduplicating');
     const jobs = engine.sort([...results.values()]).slice(0,options.limit);
-    if (!stats.staleBoards && stats.boardsVisited === boards.length && !options.dateSeconds) {
-      await this.cache.put('search',key,{jobs,stats,refs,inventoryFingerprint:inventoryFingerprint({...inventory,boards:inventory.boards.map(board => changes.find(change => boardKey(change) === boardKey(board)) || board)})},{ttl:CACHE_TTL.search});
+    if (!stats.staleBoards && !stats.partialBoards && !stats.failedBoards && stats.boardsVisited === boards.length && !options.dateSeconds) {
+      const changed = new Map(changes.map(board => [boardKey(board),board]));
+      try {await this.cache.put('search',key,{jobs,stats,refs,inventoryFingerprint:inventoryFingerprint({...inventory,boards:inventory.boards.map(board => changed.get(boardKey(board)) || board)})},{ttl:CACHE_TTL.search});}
+      catch (error) {if (error.name === 'AbortError') throw error;stats.errors.push(`${provider.name}: search cache write failed: ${error.message}`);}
     }
+    stats.complete = stats.complete && !stats.errors.length;
     return {jobs,stats};
   }
 }

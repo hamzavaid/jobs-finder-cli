@@ -47,7 +47,7 @@ test('cancellation preserves complete writes and rejects work waiting for a lock
 test('obsolete search records are pruned but discovery inventories survive', async () => temporary(async root => {
   const cache = new CacheManager({root});
   await cache.put('inventory','Lever',inventory());
-  await cache.put('search','query',{jobs:[],refs:[],inventoryFingerprint:'abc'},{ttl:100});
+  await cache.put('search','query',{jobs:[],refs:[],inventoryFingerprint:'abc',stats:{errors:[]}},{ttl:100});
   const old = new Date(Date.now() - 3 * 86400000);
   for (const kind of ['inventory','search']) await utimes(cache.path(kind,kind === 'inventory' ? 'Lever' : 'query'),old,old);
   await cache.prune();

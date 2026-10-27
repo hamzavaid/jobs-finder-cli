@@ -76,6 +76,7 @@ export async function runCli(argv = process.argv) {
       const content = serializeJobs(jobs, options.format);
       await emit(content, options.output);
       if (options.output) eprint(`Wrote ${jobs.length} jobs to ${options.output}`);
+      if (stats.exactCacheHits) eprint(`Reused cached search results for ${stats.exactCacheHits} provider(s).`);
       eprint(`Scanned ${stats.cardsSeen} cards across ${stats.pages} page(s) on ${options.websites.join(', ')}; ${jobs.length} accepted, ${stats.rejected} excluded.`);
       for (const issue of stats.errors.slice(0,8)) eprint(`WARNING: ${issue}`);
       if (stats.errors.length > 8) eprint(`WARNING: ${stats.errors.length - 8} additional provider/board issues; coverage is partial.`);

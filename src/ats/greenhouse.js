@@ -42,6 +42,6 @@ export const greenhouseProvider = {
     if (String(data?.id) !== String(id)) throw new Error('Greenhouse detail posting ID mismatch.');
     const job = normalizeGreenhouse(data,board);
     if (!job) throw new Error('Greenhouse returned an invalid detail payload.');
-    return {...job,detailsFetched:true};
+    return {...job,detailsFetched:true,apiDetailsFetched:true};
   }
 };

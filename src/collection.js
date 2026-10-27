@@ -27,7 +27,7 @@ export class CollectionManager {
         const cached = await this.cache.read('postings',ref.key);
         return this.cache.fresh(cached) && cached.data.revision === ref.revision;
       },{signal:this.signal});
-      if (valid.every(Boolean)) {this.report(provider.name,'exact search cache loaded');return {jobs:exact.data.jobs,stats:{...exact.data.stats,errors:[...new Set([...exact.data.stats.errors,...discovery.errors])],complete:exact.data.stats.complete && discovery.complete,cacheHits:exact.data.refs.length,exactCacheHit:true}};}
+      if (valid.every(Boolean)) {this.report(provider.name,'exact search cache loaded');return {jobs:exact.data.jobs,stats:{...exact.data.stats,pages:0,cardsSeen:0,detailRequests:0,rejected:0,unknownExcluded:0,errors:[...new Set([...exact.data.stats.errors,...discovery.errors])],complete:exact.data.stats.complete && discovery.complete,cacheHits:exact.data.refs.length,exactCacheHit:true}};}
     }
     const boards = inventory.boards.filter(board => board.status === 'valid' || board.status === 'pending');
     if (!boards.length) throw new Error(`${provider.name}: no validated boards available${discovery.errors.length ? '; ' + discovery.errors.join(' | ') : '; discovery or validation is incomplete'}.`);
@@ -59,7 +59,7 @@ export class CollectionManager {
             revision:stableKey(outcome.jobs.map(({fetchedAt,...job}) => job))};
           // A truncated fetch never replaces a complete board inventory.
           if (!outcome.complete && cached) {
-            const jobs = new Map(cached.data.jobs.map(job => [job.id,job]));
+            const jobs = new Map(cached.data.jobs.filter(job => this.now() - Date.parse(job.lastObservedAt || cached.data.lastSuccessfulFetchAt || cached.updatedAt) <= CACHE_TTL.stale).map(job => [job.id,job]));
             for (const job of updated.jobs) jobs.set(job.id,job);
             updated.jobs = [...jobs.values()];updated.revision = stableKey(updated.jobs);
           }
@@ -83,9 +83,11 @@ export class CollectionManager {
       const enriched = [];
       for (let job of record.data.jobs) {
         stats.cardsSeen++;
+        if (job.lastObservedAt && this.now() - Date.parse(job.lastObservedAt) > CACHE_TTL.stale) continue;
         if (provider.name === 'Greenhouse' && (options.dateSeconds || options.strict) && engine.keywords(job)) {
           const precheck = engine.evaluate(job);
-          if (!precheck.failures.length && (options.dateSeconds && !job.postedAt || options.strict && precheck.unknowns.length) && stats.detailRequests < 200) {
+          const enrichable = precheck.unknowns.some(field => !['under','verified'].includes(field));
+          if (!job.apiDetailsFetched && !precheck.failures.length && (options.dateSeconds && !job.postedAt || options.strict && enrichable) && stats.detailRequests < 200) {
             try {stats.detailRequests++;job = await provider.fetchDetail(board,job.providerJobId,this.http);dirty = true;}
             catch (error) {if (error.name === 'AbortError') throw error;stats.errors.push(`${provider.name}: detail ${job.providerJobId}: ${error.message}`);}
           }
@@ -118,7 +120,7 @@ export class CollectionManager {
     if (!stats.boardsVisited) throw new Error(`${provider.name}: no board data could be collected. ${stats.errors.slice(0,3).join(' | ')}`);
     this.report(provider.name,'filtering and deduplicating');
     const jobs = engine.sort([...results.values()]).slice(0,options.limit);
-    if (!stats.staleBoards && !stats.partialBoards && !stats.failedBoards && stats.boardsVisited === boards.length && !options.dateSeconds) {
+    if (!stats.staleBoards && !options.dateSeconds) {
       const changed = new Map(changes.map(board => [boardKey(board),board]));
       try {await this.cache.put('search',key,{jobs,stats,refs,inventoryFingerprint:inventoryFingerprint({...inventory,boards:inventory.boards.map(board => changed.get(boardKey(board)) || board)})},{ttl:CACHE_TTL.search});}
       catch (error) {if (error.name === 'AbortError') throw error;stats.errors.push(`${provider.name}: search cache write failed: ${error.message}`);}

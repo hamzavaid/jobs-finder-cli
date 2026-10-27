@@ -19,7 +19,7 @@ export class RequestScheduler {
   }
   drain() {
     while (this.active < this.concurrency) {
-      const index = this.queue.findIndex(task => (this.hosts.get(task.host) || 0) < (/archive|commoncrawl/.test(task.host) ? 1 : this.perHost));
+      const index = this.queue.findIndex(task => (this.hosts.get(task.host) || 0) < (/archive|commoncrawl|urlscan/.test(task.host) ? 1 : this.perHost));
       if (index < 0) return;
       const task = this.queue.splice(index,1)[0];
       this.active++;this.hosts.set(task.host,(this.hosts.get(task.host) || 0) + 1);

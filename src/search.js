@@ -58,6 +58,7 @@ export async function findJobs(options, http, context = {}) {
   }
   const duplicateHints = identifyCrossSourceDuplicates(merged);
   stats.possibleCrossSourceDuplicates = duplicateHints.possible;
+  stats.exactCacheHits = outcomes.filter(item => item.outcome?.stats.exactCacheHit).length;
   stats.duplicatesRemoved = outcomes.reduce((sum,item) => sum + (item.outcome?.stats.duplicatesRemoved || 0),0);
   return {jobs:duplicateHints.jobs,stats};
 }

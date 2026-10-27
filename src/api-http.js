@@ -10,7 +10,8 @@ export function assertApiUrl(value) {
     'api.eu.lever.co':/^\/v0\/postings\/[^/]+(?:\/[^/]+)?$/,
     'api.ashbyhq.com':/^\/posting-api\/job-board\/[^/]+$/,
     'web.archive.org':/^\/cdx\/search\/cdx$/,
-    'index.commoncrawl.org':/^\/(?:collinfo\.json|CC-MAIN-\d{4}-\d{2}-index)$/
+    'index.commoncrawl.org':/^\/(?:collinfo\.json|CC-MAIN-\d{4}-\d{2}-index)$/,
+    'urlscan.io':/^\/api\/v1\/search\/$/
   };
   if (url.protocol !== 'https:' || url.port || url.username || url.password || !Object.hasOwn(allowed,url.hostname) || !allowed[url.hostname].test(url.pathname) || /%2f|%5c|%00/i.test(url.pathname)) throw new Error('Refusing an untrusted ATS/index request URL.');
   return url;
@@ -28,7 +29,7 @@ export function createApiClient({retries = 2,random = Math.random,fetchImpl = gl
     return scheduler.run(host,async () => {
       signal?.throwIfAborted();
       const slot = Math.max(now(),next.get(host) || 0,cooldown.get(host) || 0);
-      next.set(host,slot + (/archive|commoncrawl/.test(host) ? Math.max(1100,delayMs) : delayMs));
+      next.set(host,slot + (host === 'urlscan.io' ? Math.max(2100,delayMs) : /archive|commoncrawl/.test(host) ? Math.max(1100,delayMs) : delayMs));
       if (slot - now() > 30000) {const error = new AccessError(`${host}: provider is backed off; retry later.`,429);error.retryAt = new Date(slot).toISOString();throw error;}
       if (slot > now()) await sleep(slot - now());
       signal?.throwIfAborted();

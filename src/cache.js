@@ -3,7 +3,7 @@ import {join} from 'node:path';
 import {homedir} from 'node:os';
 import {createHash,randomUUID} from 'node:crypto';
 import {setTimeout as sleep} from 'node:timers/promises';
-import {validBoardId} from './ats/shared.js';
+import {validBoardId,publicLink} from './ats/shared.js';
 
 const DAY = 86400000, kinds = new Set(['inventory','postings','search']);
 export const CACHE_TTL = Object.freeze({postings:20 * 60000,search:10 * 60000,stale:7 * DAY});
@@ -21,14 +21,14 @@ export function stableKey(value) {
   }
   return createHash('sha256').update(JSON.stringify(ordered(value))).digest('hex');
 }
-const validJobs = jobs => Array.isArray(jobs) && jobs.length <= 50000 && jobs.every(job => job && typeof job.source === 'string' && typeof job.id === 'string' && typeof job.title === 'string' && typeof job.url === 'string');
+const validJobs = jobs => Array.isArray(jobs) && jobs.length <= 50000 && jobs.every(job => job && ['Greenhouse','Lever','Ashby'].includes(job.source) && typeof job.id === 'string' && typeof job.title === 'string' && !!publicLink(job.url));
 export function validCacheRecord(record,kind,key) {
   if (!record || record.version !== 1 || record.kind !== kind || record.key !== key || !Number.isFinite(Date.parse(record.updatedAt)) || (record.expiresAt !== null && !Number.isFinite(Date.parse(record.expiresAt)))) return false;
   const data = record.data;
   if (!data || typeof data !== 'object') return false;
   if (kind === 'inventory') return typeof data.provider === 'string' && data.cursors && typeof data.cursors === 'object' && Array.isArray(data.boards) && data.boards.length <= 50000 && data.boards.every(board => board && validBoardId(board.id) && ['global','eu'].includes(board.region || 'global') && ['pending','valid','invalid'].includes(board.status));
   if (kind === 'postings') return validJobs(data.jobs) && typeof data.complete === 'boolean' && typeof data.revision === 'string' && validBoardId(data.board?.id);
-  return validJobs(data.jobs) && Array.isArray(data.refs) && typeof data.inventoryFingerprint === 'string';
+  return validJobs(data.jobs) && Array.isArray(data.refs) && data.refs.every(ref => ref && typeof ref.key === 'string' && typeof ref.revision === 'string') && typeof data.inventoryFingerprint === 'string' && data.stats && Array.isArray(data.stats.errors);
 }
 export class CacheManager {
   constructor({root = defaultCacheDir(),now = Date.now,signal,lockTimeoutMs = 2000,onWarning = () => {}} = {}) {

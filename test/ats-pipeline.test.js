@@ -72,3 +72,13 @@ test('selected ATS providers execute concurrently while output order remains sta
   const result = await findJobs(normalizeOptions({search:'chef',website:['Greenhouse','Lever','Ashby']}),null,{collection});
   assert.equal(maximum,3);assert.deepEqual(result.jobs.map(job => job.source),['Greenhouse','Lever','Ashby']);
 });
+
+test('bounded partial searches also get exact-cache hits without concealing partial coverage', async () => temporary(async root => {
+  const cache = new CacheManager({root}),http = fixtureApi();
+  http.text = async url => {http.calls.push(url);const domain = new URL(url).searchParams.get('url').split('/')[0];return JSON.stringify([['original'],...Array.from({length:4},(_,index) => [`https://${domain}/board${index}/jobs/123`])]);};
+  const manager = new CollectionManager({cache,http,maxBoards:1}),options = normalizeOptions({search:'chef',website:'Greenhouse'});
+  const first = await manager.find(greenhouseProvider,options),count = http.calls.length;
+  assert.equal(first.stats.complete,false);assert.ok(first.stats.errors.some(error => /partial coverage/.test(error)));
+  const second = await manager.find(greenhouseProvider,options);
+  assert.equal(second.stats.exactCacheHit,true);assert.equal(second.stats.complete,false);assert.equal(http.calls.length,count);
+}));

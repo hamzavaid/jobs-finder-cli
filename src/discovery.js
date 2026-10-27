@@ -77,13 +77,13 @@ export function mergeInventory(previous,next) {
   return {...previous,...next,boards:[...merged.values()],revision:randomUUID()};
 }
 export class DiscoveryManager {
-  constructor({cache,http,now = Date.now,maxPages = 2,maxValidations = 32,fallback = true,report = () => {},signal} = {}) {
+  constructor({cache,http,now = Date.now,maxPages = 2,maxValidations = 8,fallback = true,report = () => {},signal} = {}) {
     Object.assign(this,{cache,http,now,maxPages,maxValidations,fallback,report,signal});
   }
   async ensure(provider) {
     const previous = (await this.cache.read('inventory',provider.name))?.data;
     const inventory = structuredClone(previous || {provider:provider.name,boards:[],cursors:{},revision:randomUUID()});
-    if (inventory.nextDiscoveryAt && time(inventory.nextDiscoveryAt) > this.now()) {
+    if ((inventory.nextDiscoveryAt && time(inventory.nextDiscoveryAt) > this.now()) || (this.now() - time(inventory.lastFullAt) < DISCOVERY_TTL.full && this.now() - time(inventory.lastRecentAt) < DISCOVERY_TTL.recent)) {
       this.report(provider.name,'cached boards loaded');
       return {inventory,errors:inventory.lastDiscoveryErrors || [],complete:inventory.coverageComplete === true};
     }
@@ -120,7 +120,11 @@ export class DiscoveryManager {
     }
     if (!archiveSucceeded && this.fallback) {
       try {await this.commonCrawl(provider,candidates,inventory);}
-      catch (error) {if (error.name === 'AbortError') throw error; errors.push(`Common Crawl: ${error.message}`);}
+      catch (error) {
+        if (error.name === 'AbortError') throw error;errors.push(`Common Crawl: ${error.message}`);
+        try {await this.publicScans(provider,candidates,inventory);}
+        catch (fallbackError) {if (fallbackError.name === 'AbortError') throw fallbackError;errors.push(`Public scan index: ${fallbackError.message}`);}
+      }
     }
     const due = [...candidates.values()].filter(board => board.status !== 'valid' || this.now() - time(board.lastValidatedAt) >= DISCOVERY_TTL.validation)
       .filter(board => !board.retryAt || time(board.retryAt) <= this.now()).slice(0,this.maxValidations);
@@ -143,10 +147,11 @@ export class DiscoveryManager {
     inventory.boards = [...candidates.values()];
     const stamp = new Date(this.now()).toISOString();
     inventory.lastAttemptAt = stamp;
-    if (allDone && archiveSucceeded) {inventory[mode === 'full' ? 'lastFullAt' : 'lastRecentAt'] = stamp;}
+    if (allDone && archiveSucceeded) {inventory[mode === 'full' ? 'lastFullAt' : 'lastRecentAt'] = stamp;if (mode === 'full') inventory.lastRecentAt = stamp;}
     inventory.coverageComplete = allDone && archiveSucceeded && !inventory.boards.some(board => board.status === 'pending');
     inventory.lastDiscoveryErrors = errors;
-    inventory.nextDiscoveryAt = new Date(this.now() + (!archiveSucceeded ? 15 * 60000 : allDone ? DAY : 3600000)).toISOString();
+    const fallbackFresh = this.now() - time(inventory.lastFallbackAt) < DISCOVERY_TTL.recent;
+    inventory.nextDiscoveryAt = new Date(this.now() + (!archiveSucceeded ? fallbackFresh ? DAY : 15 * 60000 : allDone ? DAY : 3600000)).toISOString();
     let saved;
     try {saved = await this.cache.update('inventory',provider.name,current => mergeInventory(current,inventory));}
     catch (error) {if (error.name === 'AbortError') throw error;errors.push(`Cache inventory write failed: ${error.message}`);saved = {data:inventory};}
@@ -175,6 +180,18 @@ export class DiscoveryManager {
       for (const line of lines) this.addCandidate(candidates,JSON.parse(line).url,provider,'commoncrawl');
       inventory.cursors[key] = {page:lines.length ? old.page + 1 : 0};
     }
+  }
+  async publicScans(provider,candidates,inventory) {
+    // Anonymous, existing public scans only; never submits URLs for scanning.
+    const url = new URL('https://urlscan.io/api/v1/search/');
+    url.searchParams.set('q',`page.domain:(${provider.domains.join(' OR ')})`);
+    url.searchParams.set('size','100');
+    const data = await this.http.json(url.toString());
+    if (!Array.isArray(data?.results)) throw new Error('Invalid public scan index payload.');
+    for (const result of data.results) {
+      this.addCandidate(candidates,result.page?.url || result.task?.url,provider,'urlscan-public');
+    }
+    inventory.lastFallbackAt = new Date(this.now()).toISOString();
   }
 }
 export const inventoryFingerprint = inventory => createHash('sha256').update(JSON.stringify(inventory.boards.map(b => [boardKey(b),b.status]).sort())).digest('hex');

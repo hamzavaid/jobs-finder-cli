@@ -29,3 +29,4 @@ jobs:
       - run: npm test
       - run: node bin/jobs.js --help
       - run: node bin/jobs.js url --search accountant --website LinkedIn Indeed Glassdoor
+      - run: node bin/jobs.js url --search accountant --website Greenhouse Lever Ashby

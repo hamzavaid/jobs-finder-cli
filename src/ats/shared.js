@@ -3,7 +3,7 @@ import {normalizeWorkplace} from '../filters.js';
 
 const reserved = new Set(['api','static','assets','_next','css','js','images','img','embed','robots.txt','favicon.ico','sitemap.xml']);
 export function validBoardId(value) {
-  return typeof value === 'string' && /^[\p{L}\p{N}][\p{L}\p{N}\p{M} ._-]{0,99}$/u.test(value) &&
+  return typeof value === 'string' && /^[\p{L}\p{N}][\p{L}\p{N}\p{M} ._&+'()-]{0,99}$/u.test(value) &&
     value === value.trim() && !reserved.has(value.toLowerCase()) && !/^root\./i.test(value) &&
     !/\.(?:js|css|json|xml|png|jpe?g|gif|svg|ico|woff2?|map)$/i.test(value);
 }

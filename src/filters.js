@@ -113,6 +113,10 @@ export function evaluateJob(job, o, now = Date.now()) {
   const unknowns = [];
   const facetReliant = [];
   if (o.company && normalizeCompany(job.company) !== normalizeCompany(o.company)) failures.push('company');
+  if ((o.provider || job.source) === 'Glassdoor' && o.location) {
+    if (!job.location) unknowns.push('location');
+    else if (!String(job.location).toLowerCase().includes(o.location.toLowerCase())) failures.push('location');
+  }
   const provider = o.provider || job.source || 'LinkedIn';
   const supported = o.supportedFacets ?? (provider === 'LinkedIn' ? ['date','workplace','remote','experience','employment','under','verified'] : o.indeedSupportedFacets || []);
   const hasFacet = key => supported.includes(key);
@@ -161,14 +165,14 @@ export function evaluateJob(job, o, now = Date.now()) {
   return {match: true, failures, unknowns, facetReliant};
 }
 export function normalizeWorkplace(input) {
-  const s = String(input || '').toLowerCase();
+  const s = String(input || '').toLowerCase().replaceAll('_','-');
   if (/\bhybrid\b/.test(s)) return 'hybrid';
   if (/\b(on[- ]?site|in[- ]?person)\b/.test(s)) return 'onsite';
   if (/\bremote\b/.test(s)) return 'remote';
   return null;
 }
 export function knownExperience(input) {
-  const s = String(input || '').toLowerCase();
+  const s = String(input || '').toLowerCase().replaceAll('_','-');
   if (/intern/.test(s)) return '1';
   if (/entry|junior/.test(s)) return '2';
   if (/associate/.test(s)) return '3';
@@ -178,7 +182,7 @@ export function knownExperience(input) {
   return null;
 }
 export function knownEmployment(input) {
-  const s = String(input || '').toLowerCase();
+  const s = String(input || '').toLowerCase().replaceAll('_','-');
   if (/intern/.test(s)) return 'I';
   if (/part[- ]?time/.test(s)) return 'P';
   if (/full[- ]?time/.test(s)) return 'F';

@@ -12,10 +12,11 @@ export async function searchProvider(provider, options, http, onProgress = () =>
   const stats = {pages:0, cardsSeen:0, detailRequests:0, rejected:0, unknownExcluded:0, facetReliant:[], errors:[]};
   const facets = new Set();
   const evaluation = {...options, provider:provider.name, supportedFacets:provider.facets(options)};
-  let offset = 0;
+  let offset = 0, nextUrl = null;
   try {
+    if (provider.prepareHttp) http = await provider.prepareHttp(http);
     for (let page = 0; page < options.pages && results.size < options.limit; page++) {
-      const html = await http.get(provider.searchUrl(options, offset, page));
+      const html = await http.get(nextUrl || provider.searchUrl(options, offset, page));
       const cards = provider.parseCards(html);
       assertSearchPage(html, cards, provider.emptyPattern, provider.name);
       stats.pages++;
@@ -30,7 +31,7 @@ export async function searchProvider(provider, options, http, onProgress = () =>
         let job = card;
         if (options.details || options.strict || (provider.name === 'LinkedIn' && (options.under != null || options.verified != null))) {
           stats.detailRequests++;
-          job = provider.parseDetail(await http.get(provider.detailUrl(card.id)), card);
+          job = provider.parseDetail(await http.get(provider.detailUrl(card.id, card)), card);
         }
         const decision = evaluateJob(job, evaluation);
         if (!decision.match) {
@@ -48,6 +49,10 @@ export async function searchProvider(provider, options, http, onProgress = () =>
       onProgress({page:page + 1, received:cards.length, accepted:results.size});
       if (!fresh) break;
       offset += provider.pageSize || cards.length;
+      if (provider.nextPage && page + 1 < options.pages && results.size < options.limit) {
+        nextUrl = provider.nextPage(html);
+        if (!nextUrl) break;
+      }
     }
   } catch (error) {
     if (!results.size) throw error;

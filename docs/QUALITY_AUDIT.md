@@ -51,3 +51,10 @@ sanitized table control characters. Prototype-chain choice names also now reject
 Coarse Indeed date buckets are only considered a facet when they exactly equal the
 requested window. Baseline 31 tests still pass; nine regression groups added, 40/40
 pass. Cross-process store contention fails explicitly instead of silently losing data.
+
+Phase 3: added Glassdoor provider, DOM and JSON-LD contracts, conservative local
+filtering, robots-checked public-link pagination and descriptive blocked/markup
+errors. Six new test groups; 46/46 pass. See GLASSDOOR_RESEARCH.md for primary
+sources and limitations. Live Node request returned HTTP 403; no live extraction
+claim is made. npm registry advisory check succeeded: zero known vulnerabilities;
+installing the free robots-parser dependency also reported zero vulnerabilities.

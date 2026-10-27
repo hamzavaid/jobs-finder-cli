@@ -4,3 +4,8 @@ node_modules/
 results/
 
 .jobs-cli/
+
+.npm-cache/
+.env
+.env.*
+!.env.example

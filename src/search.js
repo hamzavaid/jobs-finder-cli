@@ -18,12 +18,14 @@ export async function findJobs(options, http, context = {}) {
   const outcomes = await Promise.all(selected.map(async site => {
     try {
       context.signal?.throwIfAborted();
+      context.report?.(site,'searching');
       const provider = providers[site];
       if (!provider) throw new Error(`Unknown provider: ${site}`);
       const outcome = provider.kind === 'ats' ? await collection.find(provider,options) : await searchProvider(provider,options,http);
       context.signal?.throwIfAborted();
+      context.report?.(site,`${outcome.jobs.length} matching jobs collected`);
       return {site,outcome};
-    } catch (error) {return {site,error};}
+    } catch (error) {context.report?.(site,error.name === 'AbortError' ? 'canceled' : 'provider failed');return {site,error};}
   }));
   await collection?.cache.flush();
   context.signal?.throwIfAborted();

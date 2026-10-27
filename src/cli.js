@@ -6,6 +6,7 @@ import {providers, fetchProviderJob} from './providers.js';
 import {assertSearchPage} from './provider-search.js';
 import {serializeJobs, emit} from './output.js';
 import {savedJobs, saveJobs, statsForSaved, defaultDbPath} from './store.js';
+import {ProgressReporter} from './progress.js';
 
 function addFilters(command) {
   return command
@@ -27,7 +28,7 @@ function addOutputOptions(command) {
     .option('-o, --output <file>', 'Write results to a file instead of stdout');
 }
 function eprint(message) {process.stderr.write(message + '\n');}
-function createClient(options) {return createHttpClient({delayMs: Number(options.delay ?? 1200)});}
+function createClient(options,signal) {return createHttpClient({delayMs:Number(options.delay ?? 1200),signal});}
 function filterSaved(jobs, options) {
   let rows = jobs;
   if (options.company) rows = rows.filter(j => normalizeCompany(j.company) === normalizeCompany(options.company));
@@ -58,8 +59,16 @@ export async function runCli(argv = process.argv) {
     .option('--save', 'Upsert results into local JSON store')))
     .action(async raw => {
       const options = normalizeOptions(raw);
-      const http = createClient(options);
-      const {jobs, stats} = await findJobs(options, http);
+      const controller = new AbortController(),progress = new ProgressReporter();
+      const cancel = () => {progress.update('Search','canceling');controller.abort();};
+      process.once('SIGINT',cancel);
+      let outcome;
+      try {
+        progress.start(options);
+        outcome = await findJobs(options,createClient(options,controller.signal),{signal:controller.signal,report:(site,message) => progress.update(site,message)});
+        progress.finish(outcome.jobs.length,{partial:!!outcome.stats.errors.length,duplicates:outcome.stats.duplicatesRemoved});
+      } finally {process.removeListener('SIGINT',cancel);progress.close();}
+      const {jobs,stats} = outcome;
       if (options.save) {
         const result = await saveJobs(jobs);
         eprint(`Saved ${result.saved} jobs locally (${result.total} total) to ${result.path}`);
@@ -68,7 +77,8 @@ export async function runCli(argv = process.argv) {
       await emit(content, options.output);
       if (options.output) eprint(`Wrote ${jobs.length} jobs to ${options.output}`);
       eprint(`Scanned ${stats.cardsSeen} cards across ${stats.pages} page(s) on ${options.websites.join(', ')}; ${jobs.length} accepted, ${stats.rejected} excluded.`);
-      for (const issue of stats.errors) eprint(`WARNING: ${issue}`);
+      for (const issue of stats.errors.slice(0,8)) eprint(`WARNING: ${issue}`);
+      if (stats.errors.length > 8) eprint(`WARNING: ${stats.errors.length - 8} additional provider/board issues; coverage is partial.`);
       if (stats.facetReliant.length) {
         eprint(`CAUTION: Could not independently confirm some server-applied facets: ${stats.facetReliant.join(', ')}. Use --strict to exclude uncertain matches.`);
       }
@@ -172,7 +182,7 @@ export async function runCli(argv = process.argv) {
   try {
     await program.parseAsync(argv);
   } catch (error) {
-    eprint(`Error: ${error.message}`);
-    process.exitCode = 1;
+    eprint(error.name === 'AbortError' ? 'Search canceled. Completed cache writes were preserved.' : `Error: ${error.message}`);
+    process.exitCode = error.name === 'AbortError' ? 130 : 1;
   }
 }

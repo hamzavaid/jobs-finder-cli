@@ -55,3 +55,5 @@ it does not execute Python or adopt the reference project's curated seed list.
 3. Implemented bounded, resumable CDX discovery and a public Common Crawl fallback. Candidate extraction is host-restricted; HEAD validation falls back to JSON GET only for unreliable method responses. Temporary failures preserve prior validity. Five deterministic discovery groups pass. Persistence is injected and implemented in phase 4.
 
 4. Added OS-native cache paths, versioned/validated JSON envelopes, atomic shard replacement, cross-process locking, dead-owner recovery, corruption quarantine and automatic pruning. Six cache test groups pass, including concurrent instances and canceled lock waits. No runtime dependencies were added.
+
+5. Integrated automatic discovery/collection and all three cache layers into find, extended defaults to six sources, and retained explicit HTML-provider regressions. Added internal FilterEngine and ProviderRegistry. First-run fixture tests need no seeded boards; identical repeat searches make zero API/index requests. Full suite: 94 tests pass. URL utility reports that ATS APIs have no global search URL; saved/export/stats recognize all six sources.

@@ -37,18 +37,18 @@ test('single and three-provider searches interleave source-qualified postings wi
     const result = await findJobs(normalizeOptions({search:'chef',website:site,pages:1}),http);
     assert.equal(result.jobs.length,2); assert.ok(result.jobs.every(job => job.source === site));
   }
-  const result = await findJobs(normalizeOptions({search:'chef',limit:3,pages:1}),http);
+  const result = await findJobs(normalizeOptions({search:'chef',limit:3,pages:1,website:['LinkedIn','Indeed','Glassdoor']}),http);
   assert.deepEqual(result.jobs.map(job => job.source),['LinkedIn','Indeed','Glassdoor']);
   assert.equal(result.stats.errors.length,0);
 });
 test('Glassdoor failure leaves other providers usable and all failures are explicit', async () => {
   const li = await fixture('search.html');
-  const result = await findJobs(normalizeOptions({search:'chef',pages:1}),{get:async url => {
+  const result = await findJobs(normalizeOptions({search:'chef',pages:1,website:['LinkedIn','Indeed','Glassdoor']}),{get:async url => {
     if (!url.includes('linkedin.com')) throw new Error('HTTP 403');
     return li;
   }});
   assert.equal(result.jobs.length,2); assert.equal(result.stats.errors.length,2);
-  await assert.rejects(findJobs(normalizeOptions({search:'chef'}),{get:async () => {throw new Error('blocked');}}), /All selected sites failed/);
+  await assert.rejects(findJobs(normalizeOptions({search:'chef',website:['LinkedIn','Indeed','Glassdoor']}),{get:async () => {throw new Error('blocked');}}), /All selected sites failed/);
 });
 test('detail dispatch detects providers, rejects foreign URLs and conflicting options before network', async () => {
   assert.equal(postingProvider('https://www.glassdoor.com/job-listing/a.htm?jl=100000000001').name,'Glassdoor');

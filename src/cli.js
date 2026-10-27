@@ -9,7 +9,7 @@ import {savedJobs, saveJobs, statsForSaved, defaultDbPath} from './store.js';
 
 function addFilters(command) {
   return command
-    .option('--website <sites...>', 'LinkedIn Indeed Glassdoor (one or more; default: all three)', (values, prev) => [...prev, ...(Array.isArray(values) ? values : [values])], [])
+    .option('--website <sites...>', 'LinkedIn Indeed Glassdoor Greenhouse Lever Ashby (one or more; default: all six)', (values, prev) => [...prev, ...(Array.isArray(values) ? values : [values])], [])
     .option('--search <keywords>', 'Free-form job keywords (ANY occupation, e.g. chef, accountant)')
     .option('--date <duration>', 'Posted within Nh/Nd/Nw, e.g. 1d = past 24 hours')
     .option('--company <name>', 'Company name (client-side exact-normalized match)')
@@ -43,7 +43,7 @@ function filterSaved(jobs, options) {
 export async function runCli(argv = process.argv) {
   const program = new Command();
   program.name('jobs')
-    .description('Search job listings on LinkedIn, Indeed and Glassdoor across all occupations.')
+    .description('Search job listings on public job boards and ATS APIs across all occupations.')
     .version('2.0.0')
     .showHelpAfterError('(run jobs --help for commands)');
 
@@ -96,7 +96,7 @@ export async function runCli(argv = process.argv) {
     .description('Show locally saved job results without making any web requests')
     .option('--search <text>', 'Search title/company/description/location')
     .option('--company <name>', 'Restrict to company')
-    .option('--website <sites...>', 'Filter saved sources: LinkedIn Indeed Glassdoor', (values, prev) => [...prev, ...(Array.isArray(values) ? values : [values])], [])
+    .option('--website <sites...>', 'Filter saved sources: LinkedIn Indeed Glassdoor Greenhouse Lever Ashby', (values, prev) => [...prev, ...(Array.isArray(values) ? values : [values])], [])
     .option('--limit <number>', 'Maximum output rows'))
     .action(async options => {
       validateOutputOptions(options);
@@ -110,7 +110,7 @@ export async function runCli(argv = process.argv) {
     .option('--format <format>', 'json | jsonl | csv', 'csv')
     .option('--search <text>', 'Search title/company/description/location')
     .option('--company <name>', 'Restrict to company')
-    .option('--website <sites...>', 'Filter saved sources: LinkedIn Indeed Glassdoor', (values, prev) => [...prev, ...(Array.isArray(values) ? values : [values])], [])
+    .option('--website <sites...>', 'Filter saved sources: LinkedIn Indeed Glassdoor Greenhouse Lever Ashby', (values, prev) => [...prev, ...(Array.isArray(values) ? values : [values])], [])
     .action(async options => {
       if (!['json', 'jsonl', 'csv'].includes(options.format)) throw new Error('Export format must be json, jsonl, or csv.');
       const jobs = filterSaved(await savedJobs(), options);
@@ -129,14 +129,17 @@ export async function runCli(argv = process.argv) {
     .description('Print LinkedIn, Indeed and/or Glassdoor search URLs (no web request)'))
     .action(raw => {
       const opts = normalizeOptions({...raw, limit: 1, pages: 1});
-      for (const site of opts.websites) process.stdout.write(providers[site].searchUrl(opts, 0) + '\n');
+      for (const site of opts.websites) {
+        if (providers[site].kind === 'ats') eprint(`${site}: company-specific URLs are discovered automatically by jobs find; no global search URL exists.`);
+        else process.stdout.write(providers[site].searchUrl(opts,0) + '\n');
+      }
     });
 
   program.command('doctor')
     .description('Display runtime/store info; optionally probe selected public search pages')
     .option('--probe', 'Request one search page per selected provider (plus Glassdoor robots.txt)')
     .option('--search <keywords>', 'Keywords for --probe', 'chef')
-    .option('--website <sites...>', 'LinkedIn Indeed Glassdoor; default: all three', (values, prev) => [...prev, ...(Array.isArray(values) ? values : [values])], [])
+    .option('--website <sites...>', 'LinkedIn Indeed Glassdoor Greenhouse Lever Ashby; default: all six', (values, prev) => [...prev, ...(Array.isArray(values) ? values : [values])], [])
     .action(async options => {
       const sites = normalizeWebsites(options.website);
       const info = {node:process.version, database:defaultDbPath(), saved:(await savedJobs()).length, websites:sites, onlineProbe:'skipped'};
@@ -147,6 +150,11 @@ export async function runCli(argv = process.argv) {
         for (const site of sites) {
           const provider = providers[site];
           try {
+            if (provider.kind === 'ats') {
+              const {jobs,stats} = await findJobs({...opt,websites:[site]},createClient({}));
+              info.onlineProbe[site] = {status:'ok',jobs:jobs.length,boards:stats.providers[site].boardsVisited};
+              continue;
+            }
             const client = provider.prepareHttp ? await provider.prepareHttp(http) : http;
             const html = await client.get(provider.searchUrl(opt));
             const cards = provider.parseCards(html);

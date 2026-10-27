@@ -61,3 +61,14 @@ test('unsupported applicant/verification attributes never become ATS matches', a
     assert.equal(result.jobs.length,0);assert.ok(result.stats.unknownExcluded > 0);
   }
 }));
+
+test('selected ATS providers execute concurrently while output order remains stable', async () => {
+  let active = 0,maximum = 0;
+  const collection = {cache:{flush:async () => {}},find:async provider => {
+    active++;maximum = Math.max(maximum,active);
+    await new Promise(resolve => setTimeout(resolve,provider.name === 'Greenhouse' ? 15 : 2));active--;
+    return {jobs:[{source:provider.name,id:provider.name,title:'Chef'}],stats:{pages:1,cardsSeen:1,rejected:0,detailRequests:0,unknownExcluded:0,facetReliant:[],errors:[]}};
+  }};
+  const result = await findJobs(normalizeOptions({search:'chef',website:['Greenhouse','Lever','Ashby']}),null,{collection});
+  assert.equal(maximum,3);assert.deepEqual(result.jobs.map(job => job.source),['Greenhouse','Lever','Ashby']);
+});

@@ -1,14 +1,17 @@
 export async function mapConcurrent(items,concurrency,visit,{signal} = {}) {
   let index = 0;
   const results = new Array(items.length);
-  await Promise.all(Array.from({length:Math.min(concurrency,items.length)},async () => {
+  const workers = await Promise.allSettled(Array.from({length:Math.min(concurrency,items.length)},async () => {
     while (index < items.length) {signal?.throwIfAborted();const current = index++;results[current] = await visit(items[current],current);}
   }));
+  const failure = workers.find(result => result.status === 'rejected');
+  if (failure) throw failure.reason;
   return results;
 }
 export class RequestScheduler {
   constructor({concurrency = 4,perHost = 2,signal} = {}) {
     Object.assign(this,{concurrency,perHost,signal});this.active = 0;this.hosts = new Map();this.queue = [];
+    signal?.addEventListener('abort',() => {for (const task of this.queue.splice(0)) task.reject(signal.reason);},{once:true});
   }
   run(host,work) {
     this.signal?.throwIfAborted();

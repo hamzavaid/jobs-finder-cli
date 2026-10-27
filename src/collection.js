@@ -16,13 +16,13 @@ export class CollectionManager {
     this.http = http || createApiClient({signal});
   }
   async find(provider,options) {
-    const stats = {...emptyStats(),boardsKnown:0,boardsVisited:0,cacheHits:0,staleBoards:0,complete:false,duplicatesRemoved:0};
+    const stats = {...emptyStats(),boardsKnown:0,boardsVisited:0,cacheHits:0,staleBoards:0,complete:false,duplicatesRemoved:0,partialBoards:0};
     const discovery = await new DiscoveryManager({cache:this.cache,http:this.http,signal:this.signal,report:this.report,now:this.now,...this.discoveryOptions}).ensure(provider);
     const inventory = discovery.inventory;
     stats.errors.push(...discovery.errors);
     const fingerprint = inventoryFingerprint(inventory), key = searchCacheKey(options,provider.name);
     const exact = await this.cache.read('search',key);
-    if (exact && this.cache.fresh(exact) && exact.data.inventoryFingerprint === fingerprint) {
+    if (!options.dateSeconds && exact && this.cache.fresh(exact) && exact.data.inventoryFingerprint === fingerprint) {
       const valid = await mapConcurrent(exact.data.refs,16,async ref => {
         const cached = await this.cache.read('postings',ref.key);
         return this.cache.fresh(cached) && cached.data.revision === ref.revision;
@@ -33,14 +33,15 @@ export class CollectionManager {
     if (!boards.length) throw new Error(`${provider.name}: no validated boards available${discovery.errors.length ? '; ' + discovery.errors.join(' | ') : '; discovery or validation is incomplete'}.`);
     stats.boardsKnown = boards.length;
     const engine = new FilterEngine(options,{now:this.now}), results = new Map(),refs = [],changes = [];
-    const snapshots = await mapConcurrent(boards,16,async board => ({board,key:`${provider.name}:${boardKey(board)}`,cached:await this.cache.read('postings',`${provider.name}:${boardKey(board)}`)}),{signal:this.signal});
-    // Refresh oldest data first so repeated bounded runs make forward progress.
-    snapshots.sort((a,b) => (Date.parse(a.cached?.updatedAt) || 0) - (Date.parse(b.cached?.updatedAt) || 0) || boardKey(a.board).localeCompare(boardKey(b.board)));
+    const snapshots = boards.map(board => ({board,key:`${provider.name}:${boardKey(board)}`}));
+    // Read large posting shards only inside the two-worker loop, never all at once.
+    snapshots.sort((a,b) => (Date.parse(a.board.lastJobFetchAt) || 0) - (Date.parse(b.board.lastJobFetchAt) || 0) || boardKey(a.board).localeCompare(boardKey(b.board)));
     let refreshes = 0;
     this.report(provider.name,`fetching jobs: 0 / ${boards.length} boards`);
-    await mapConcurrent(snapshots,2,async ({board,key:boardCacheKey,cached}) => {
+    await mapConcurrent(snapshots,2,async ({board,key:boardCacheKey}) => {
+      const cached = await this.cache.read('postings',boardCacheKey);
       this.signal?.throwIfAborted();
-      let record = cached;
+      let record = cached,dirty = false;
       const contentNeeded = provider.name === 'Greenhouse' && options.details;
       const fresh = this.cache.fresh(cached) && (!contentNeeded || cached.data.content);
       if (fresh) stats.cacheHits++;
@@ -60,44 +61,55 @@ export class CollectionManager {
             for (const job of outcome.jobs) jobs.set(job.id,job);
             updated.jobs = [...jobs.values()];updated.revision = stableKey(updated.jobs);
           }
-          record = await this.cache.put('postings',boardCacheKey,updated,{ttl:CACHE_TTL.postings});
-          changes.push({...board,status:'valid',lastValidatedAt:new Date(this.now()).toISOString(),validationAttemptAt:new Date(this.now()).toISOString(),retryAt:null});
+          record = {data:updated,updatedAt:new Date(this.now()).toISOString(),expiresAt:new Date(this.now() + CACHE_TTL.postings).toISOString()};dirty = true;
+          changes.push({...board,status:'valid',lastJobFetchAt:new Date(this.now()).toISOString(),lastValidatedAt:new Date(this.now()).toISOString(),validationAttemptAt:new Date(this.now()).toISOString(),retryAt:null});
           if (!outcome.complete) stats.errors.push(`${provider.name}: ${board.id}: partial board (${outcome.reason || 'pagination incomplete'}).`);
         } catch (error) {
           if (error.name === 'AbortError') throw error;
           const invalid = [404,410].includes(error.status);
-          changes.push({...board,status:invalid ? 'invalid' : board.status,lastError:error.message,validationAttemptAt:new Date(this.now()).toISOString(),retryAt:new Date(this.now() + (invalid ? 7 * 86400000 : 15 * 60000)).toISOString()});
+          changes.push({...board,status:invalid ? 'invalid' : board.status,lastError:error.message,validationAttemptAt:new Date(this.now()).toISOString(),retryAt:error.retryAt || new Date(this.now() + (invalid ? 7 * 86400000 : 15 * 60000)).toISOString()});
           stats.errors.push(`${provider.name}: ${board.id}: ${error.message}`);
           if (invalid || !cached || !this.cache.usableStale(cached)) return;
           stats.staleBoards++;
         }
       }
       if (!record) return;
-      stats.boardsVisited++;refs.push({key:boardCacheKey,revision:record.data.revision});
-      if (!record.data.complete) stats.complete = false;
+      stats.boardsVisited++;
+      if (!record.data.complete) stats.partialBoards++;
+      const enriched = [];
       for (let job of record.data.jobs) {
         stats.cardsSeen++;
         if (provider.name === 'Greenhouse' && (options.dateSeconds || options.strict) && engine.keywords(job)) {
           const precheck = engine.evaluate(job);
-          if (!precheck.failures.length && (options.dateSeconds && !job.postedAt || options.strict && precheck.unknowns.length)) {
-            try {job = await provider.fetchDetail(board,job.providerJobId,this.http);stats.detailRequests++;}
+          if (!precheck.failures.length && (options.dateSeconds && !job.postedAt || options.strict && precheck.unknowns.length) && stats.detailRequests < 200) {
+            try {stats.detailRequests++;job = await provider.fetchDetail(board,job.providerJobId,this.http);dirty = true;}
             catch (error) {if (error.name === 'AbortError') throw error;stats.errors.push(`${provider.name}: detail ${job.providerJobId}: ${error.message}`);}
           }
         }
+        enriched.push(job);
         const decision = engine.evaluate(job);
         if (!decision.match) {stats.rejected++;if (decision.unknowns.length) stats.unknownExcluded++;continue;}
         if (results.has(job.id)) stats.duplicatesRemoved++;
         results.set(job.id,{...job,cacheStatus:this.cache.fresh(record) ? 'fresh' : 'stale',cacheFetchedAt:record.updatedAt});
+        if (results.size > options.limit * 2) {
+          const best = engine.sort([...results.values()]).slice(0,options.limit);results.clear();for (const row of best) results.set(row.id,row);
+        }
       }
+      if (dirty) {
+        record.data.jobs = enriched;record.data.revision = stableKey(enriched.map(({fetchedAt,...job}) => job));
+        record = await this.cache.put('postings',boardCacheKey,record.data,{ttl:CACHE_TTL.postings});
+      }
+      refs.push({key:boardCacheKey,revision:record.data.revision});
       this.report(provider.name,`fetching jobs: ${stats.boardsVisited} / ${boards.length} boards`);
     },{signal:this.signal});
+    if (stats.detailRequests >= 200) stats.errors.push(`${provider.name}: detail request budget reached; unmatched unknown attributes remain excluded.`);
     if (changes.length) await this.cache.update('inventory',provider.name,current => mergeInventory(current,{...inventory,boards:changes}));
-    stats.complete = discovery.complete && stats.boardsVisited === boards.length && !stats.staleBoards && !stats.errors.length;
+    stats.complete = discovery.complete && stats.boardsVisited === boards.length && !stats.staleBoards && !stats.partialBoards && !stats.errors.length;
     if (!stats.complete) stats.errors.push(`${provider.name}: partial coverage (${stats.boardsVisited}/${boards.length} known boards; ${stats.staleBoards} stale).`);
     if (!stats.boardsVisited) throw new Error(`${provider.name}: no board data could be collected. ${stats.errors.slice(0,3).join(' | ')}`);
     this.report(provider.name,'filtering and deduplicating');
     const jobs = engine.sort([...results.values()]).slice(0,options.limit);
-    if (!stats.staleBoards && stats.boardsVisited === boards.length && !stats.detailRequests) {
+    if (!stats.staleBoards && stats.boardsVisited === boards.length && !options.dateSeconds) {
       await this.cache.put('search',key,{jobs,stats,refs,inventoryFingerprint:inventoryFingerprint({...inventory,boards:inventory.boards.map(board => changes.find(change => boardKey(change) === boardKey(board)) || board)})},{ttl:CACHE_TTL.search});
     }
     return {jobs,stats};

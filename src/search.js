@@ -4,7 +4,7 @@ import {CollectionManager} from './collection.js';
 import {createApiClient} from './api-http.js';
 export {fetchJob, findLinkedInJobs} from './linkedin.js';
 
-/** Run selected providers sequentially through a shared rate-limited HTTP client. */
+/** Execute selected providers concurrently; preserve selection order when interleaving. */
 export async function findJobs(options, http, context = {}) {
   const providerJobs = [], allErrors = [];
   const stats = {pages:0, cardsSeen:0, rejected:0, detailRequests:0, unknownExcluded:0,
@@ -14,25 +14,30 @@ export async function findJobs(options, http, context = {}) {
   if ((options.websites ?? Object.keys(providers)).some(site => providers[site]?.kind === 'ats')) {
     collection = context.collection || new CollectionManager({...context,http:context.apiHttp || createApiClient({signal:context.signal,delayMs:options.delay})});
   }
-  for (const site of options.websites ?? Object.keys(providers)) {
+  const selected = options.websites ?? Object.keys(providers);
+  const outcomes = await Promise.all(selected.map(async site => {
     try {
+      context.signal?.throwIfAborted();
       const provider = providers[site];
       if (!provider) throw new Error(`Unknown provider: ${site}`);
       const outcome = provider.kind === 'ats' ? await collection.find(provider,options) : await searchProvider(provider,options,http);
       context.signal?.throwIfAborted();
-      stats.errors.push(...(outcome.stats.errors || []));
-      successfulProviders++;
-      stats.providers[site] = {pages:outcome.stats.pages, results:outcome.jobs.length, partial:!!outcome.stats.errors?.length, boardsKnown:outcome.stats.boardsKnown,boardsVisited:outcome.stats.boardsVisited,cacheHits:outcome.stats.cacheHits};
-      for (const key of ['pages', 'cardsSeen', 'rejected', 'detailRequests', 'unknownExcluded']) stats[key] += outcome.stats[key];
-      stats.facetReliant.push(...outcome.stats.facetReliant.map(f => `${site}:${f}`));
-      providerJobs.push({site, jobs:outcome.jobs});
-    } catch (error) {
-      if (error.name === 'AbortError') throw error;
-      const message = `${site}: ${error.message}`;
-      allErrors.push(error);
-      stats.errors.push(message);
-      stats.providers[site] = {error: error.message};
+      return {site,outcome};
+    } catch (error) {return {site,error};}
+  }));
+  await collection?.cache.flush();
+  context.signal?.throwIfAborted();
+  for (const {site,outcome,error} of outcomes) {
+    if (error) {
+      allErrors.push(error);stats.errors.push(`${site}: ${error.message}`);stats.providers[site] = {error:error.message};continue;
     }
+    successfulProviders++;
+    stats.errors.push(...(outcome.stats.errors || []));
+    stats.providers[site] = {pages:outcome.stats.pages,results:outcome.jobs.length,partial:!!outcome.stats.errors?.length,
+      boardsKnown:outcome.stats.boardsKnown,boardsVisited:outcome.stats.boardsVisited,cacheHits:outcome.stats.cacheHits};
+    for (const key of ['pages','cardsSeen','rejected','detailRequests','unknownExcluded']) stats[key] += outcome.stats[key];
+    stats.facetReliant.push(...outcome.stats.facetReliant.map(filter => `${site}:${filter}`));
+    providerJobs.push({site,jobs:outcome.jobs});
   }
   if (!successfulProviders) throw new AggregateError(allErrors, `All selected sites failed: ${stats.errors.join(' | ')}`);
   // Interleave sites so a full LinkedIn page cannot prevent Indeed from appearing.

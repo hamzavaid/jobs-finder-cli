@@ -1,223 +1,242 @@
-# Jobs CLI — LinkedIn + Indeed (`jobs`)
+# Jobs Finder CLI (`jobs`)
 
-A JavaScript / Node.js command-line finder for public job postings on **LinkedIn and Indeed**, for **any occupation**: chefs, accountants, nurses, electricians, software engineers, and others. The main command is **`jobs find`**. It uses a shared filtering interface, source-labeled results, local storage, and JSON/CSV exports.
+An occupation-neutral Node.js CLI for public **LinkedIn, Indeed, and Glassdoor**
+job pages. Search for chefs, accountants, nurses, electricians, engineers, or any
+other occupation. The default is all three providers. Results retain source labels,
+can be saved locally, and export as JSON, JSONL, or CSV.
 
-> **Access and permissions:** Both providers can change or restrict their public HTML. LinkedIn's and Indeed's terms limit automated collection. Only use this CLI with appropriate authorization and in compliance with applicable site terms and law. No login, cookie harvesting, anti-bot bypass, CAPTCHA solving, proxy rotation, or undocumented API keys are provided. A 403/429/security challenge stops access to that site; searching the other selected site may continue. Indeed's public results may be inaccessible without permission, and this project does not guarantee live results. See [LinkedIn's scraping guidance](https://www.linkedin.com/help/linkedin/answer/a1341387/prohibition-of-scraping-software) and [Indeed's terms](https://www.indeed.com/legal).
+**No external API keys, paid APIs, scraping services, proxies, subscriptions, or
+user accounts are required by this software.** Runtime dependencies are free,
+open-source Cheerio, Commander, and robots-parser. It reads public HTML using
+Node's fetch; it does not execute website scripts, log in, collect cookies, solve
+CAPTCHAs, impersonate a browser, or bypass access restrictions.
 
-## Requirements and installation
+Public access is not guaranteed. A site may require authentication or block automated
+requests; the CLI reports that restriction and continues other selected providers.
+Use only with appropriate authorization under the providers' terms:
+[LinkedIn](https://www.linkedin.com/help/linkedin/answer/a1341387/prohibition-of-scraping-software),
+[Indeed](https://www.indeed.com/legal), [Glassdoor](https://www.glassdoor.com/about/terms/).
+Glassdoor's provider also checks its current robots.txt before requesting job pages.
 
-- Node.js **20+** and npm; Node.js 22 is recommended.
-- Network access and permission to access the selected sites.
+## Installation
 
-Extract the ZIP, then run in the project folder:
+Requires Node.js **20+** and npm. CI targets Node 20, 22 and 24; choose an actively
+supported Node release for regular use.
 
 ```bash
-npm install
+git clone https://github.com/hamzavaid/jobs-finder-cli.git
+cd jobs-finder-cli
+npm ci
 npm link
 jobs --help
 ```
 
-`npm link` registers the **`jobs`** executable (not `ljobs`). If Windows PowerShell cannot find it, reopen the terminal. Running without a global command also works:
+You can also extract the project and run `npm ci` in its folder. `npm link` is
+optional; without it, use `node bin/jobs.js` instead of `jobs`, or:
 
 ```bash
-node bin/jobs.js --help
-node bin/jobs.js find --search "chef" --location "Los Angeles"
+npm start -- find --search "chef"
 ```
+
+On Windows, reopen your terminal if `jobs` is missing from PATH. If PowerShell
+blocks `npm.ps1` or `jobs.ps1`, use `npm.cmd` and `jobs.cmd`, or `node bin/jobs.js`.
 
 ## Quick start
 
-### Both websites by default
-
 ```bash
-jobs find --search "chef" --location "Los Angeles" --date "1d"
-jobs find --search "tax accountant" --location "Chicago" --employment "full-time"
-```
-
-Omitting `--website` is equivalent to `--website "LinkedIn" "Indeed"`. Jobs are merged from both sites, interleaved so one site cannot take all result slots. Every result includes its originating site.
-
-### One site or several
-
-```bash
-jobs find --search "electrician" --website "Indeed"
-jobs find --search "nurse" --website "LinkedIn" --date "7d"
-jobs find --search "software engineer" --website "LinkedIn" "Indeed"
-jobs find --search "chef" --website "Indeed" "LinkedIn" --format json
-```
-
-Website names are **case-insensitive**. The following alternate syntaxes are also supported:
-
-```bash
-jobs find --search "accountant" --website linkedin indeed
-jobs find --search "accountant" --website LinkedIn,Indeed
-jobs find --search "accountant" --website LinkedIn --website Indeed
-```
-
-An unknown site causes a validation error; duplicates are removed. Supported values: `LinkedIn`, `Indeed`.
-
-### Every requested filter
-
-```bash
-jobs find --website "LinkedIn" "Indeed" --search "software engineer" --date "1d" --company "Google" --remote "True" --experience "entry" --employment "internship" --under "True" --verified "True" --location "Los Angeles"
-```
-
-**Important:** Indeed does **not** expose equivalent public filters for applicant count or verified-job status. If either is requested, Indeed results lacking explicit supporting evidence are excluded rather than falsely marked as matches. LinkedIn applies its own facets, but some matches cannot be independently confirmed from public cards. Add `--strict` to exclude candidates relying on an unconfirmed facet. Narrow searches may return zero results.
-
-### Save and export
-
-```bash
-jobs find --search "accountant" --date 7d --save --limit 20
-jobs saved --format table
+jobs find --search "chef"
+jobs find --website "Glassdoor" --search "accountant"
+jobs find --website "LinkedIn" "Glassdoor" --search "software engineer"
+jobs find --website "LinkedIn" "Indeed" "Glassdoor" --search "mechanical engineer"
+jobs find --search "nurse" --location "Boston" --date "7d" --save
+jobs saved --website Glassdoor --format json
 jobs export --format csv --output results/jobs.csv
-jobs export --format json --output results/jobs.json
 ```
+
+Names are case-insensitive. Multiple values, comma-separated names, and repeated
+flags work; duplicates are removed, preserving the first supplied order:
+
+```bash
+jobs find --search "electrician" --website linkedin glassdoor
+jobs find --search "electrician" --website LinkedIn,Indeed,Glassdoor
+jobs find --search "electrician" --website Indeed --website Glassdoor Indeed
+```
+
+Invalid or empty provider names fail. At least one of `--search`, `--company`, or
+`--location` is required for `find` and `url`. There is no default occupation.
 
 ## Commands
 
-| Command | Description | Network access? |
-|---|---|---|
-| `jobs find [options]` | Search LinkedIn, Indeed, or both | Yes |
-| `jobs job <id-or-url> [options]` | Fetch an individual LinkedIn or Indeed posting | Yes |
-| `jobs saved [options]` | Read locally saved jobs | No |
-| `jobs export [options]` | Export saved jobs to CSV, JSON, or JSONL | No |
-| `jobs stats` | Summarize saved jobs including counts per website | No |
-| `jobs url [filters]` | Print provider search URL(s) without fetching | No |
-| `jobs doctor [--probe]` | Show runtime and storage status; optional single-site probe | Only with `--probe` |
-| `jobs --help` or `jobs <command> --help` | Show help | No |
-| `jobs --version` | Print version | No |
+| Command | Purpose | Network |
+| --- | --- | --- |
+| `find [options]` | Search selected providers; default all three | Yes |
+| `job <id-or-url> [options]` | Retrieve one posting | Yes |
+| `saved [options]` | Retrieve locally saved postings | No |
+| `export [options]` | Export locally saved postings | No |
+| `stats [options]` | Count saved postings by source/company/type/location | No |
+| `url [filters]` | Print each selected provider's search URL | No |
+| `doctor [options]` | Report runtime/store; optionally probe providers | Only with `--probe` |
+| `help [command]`, `[command] --help` | Show usage | No |
+| `--version`, `-V` | Print version | No |
 
-### `jobs find` filters
+### Search filters (`find` and `url`)
 
-| Argument | Values | Behavior |
-|---|---|---|
-| `--website <sites...>` | `LinkedIn`, `Indeed`, or both | **Default: both**; supports multiple space-separated, comma-separated, or repeated values. |
-| `--search <keywords>` | Any title or keywords, e.g., `chef`, `accountant`, `software engineer` | Free-text search with **no occupation default**. |
-| `--date <duration>` | `1h`, `1d`, `3d`, `7d`, `14d`, `30d`, or `Nh`, `Nd`, `Nw` | Last elapsed duration; `1d` means past 24 hours. Indeed offers coarser date buckets (1, 3, 7, 14 days), so some durations are approximate; strict mode may exclude uncertain dates. |
-| `--company <name>` | Any company | Case-insensitive normalized company-name check after fetching. Also sent as an Indeed company filter (`rbc`). Results on either site may omit some legitimate matches. |
-| `--remote <boolean>` | `true` / `false` | `true`: remote only. `false`: non-remote (hybrid or on-site). Omit for any workplace. LinkedIn has facets for both; Indeed's `false` is checked locally from visible fields when available. |
-| `--workplace <type>` | `remote`, `hybrid`, `onsite` | More precise than `--remote`; mutually exclusive with it. Indeed lacks a reliable public on-site-only URL filter. |
-| `--experience <level>` | `internship`, `entry`, `associate`, `senior`, `director`, `executive` (aliases: `intern`, `junior`, `mid`) | LinkedIn facet or limited Indeed `explvl` mapping (`entry`, `mid`, `senior`). Unsupported Indeed values require observable metadata. |
-| `--employment <type>` | `full-time`, `part-time`, `contract`, `temporary`, `internship`, `volunteer`, `other` | Mapped to each site's available job-type filters. Some values are unavailable on Indeed and require observed metadata. |
-| `--under <boolean>` | `true` / `false` | Under 10 applicants (`true`) or 10+ (`false`). LinkedIn has a `true` facet; Indeed does not have a corresponding reliable public facet or published count. Unknown does **not** mean false. |
-| `--verified <boolean>` | `true` / `false` | LinkedIn has a `true` verification facet. Indeed does not expose an equivalent public filter. Unknown does **not** mean unverified. |
-| `--location <place>` | City, region, country, etc. | E.g., `Los Angeles`, `Chicago`, `Remote`. |
+| Argument | Accepted values and behavior |
+| --- | --- |
+| `--website <sites...>` | `LinkedIn`, `Indeed`, `Glassdoor`; default all three |
+| `--search <keywords>` | Free-form keywords sent to provider search |
+| `--date <duration>` | Integer `Nh`, `Nd`, `Nw`; 1 hour through 365 days; `1d` means past 24 hours |
+| `--company <name>` | Local normalized equality; ignores common legal suffixes and punctuation; also a query hint |
+| `--remote <boolean>` | `true`: remote; `false`: hybrid or on-site; omit for any |
+| `--workplace <type>` | `remote`, `hybrid`, `onsite` (`on-site` alias); conflicts with `--remote` |
+| `--experience <level>` | `internship`, `entry`, `associate`, `senior`, `director`, `executive`; aliases `intern`, `entry-level`, `junior`, `mid`, `mid-senior` |
+| `--employment <type>` | `full-time`, `part-time`, `contract`, `temporary`, `internship`, `volunteer`, `other`; aliases `fulltime`, `parttime`, `intern` |
+| `--under <boolean>` | `true`: fewer than 10 applicants; `false`: at least 10; unknown does not mean false |
+| `--verified <boolean>` | Explicit job verification; employer verification alone is insufficient |
+| `--location <place>` | Server query on LinkedIn/Indeed; local case-insensitive location substring on Glassdoor |
 
-At least one of `--search`, `--company`, or `--location` is required. Boolean inputs also accept `yes/no` or `1/0`, case-insensitively.
+Boolean values accept `true/false`, `yes/no`, or `1/0`, case-insensitively. They
+require a value. Experience and employment are independent filters; entry-level
+does not imply internship. Unknown attributes are never fabricated.
 
-**Filter interpretation:** `--experience entry --employment internship` uses *two independent conditions*, not synonyms. These may be classified differently on each site. Requesting `--under true` and `--verified true` with both sites normally leaves only LinkedIn postings for which those facets can be applied. Unconfirmed LinkedIn facet matches are marked in the JSON results.
+### `find` execution and output options
 
-### `jobs find` execution options
+| Argument | Default | Behavior |
+| --- | --- | --- |
+| `--limit <n>` | `25` | Total accepted results across all providers, integer 1–200 |
+| `--pages <n>` | `5` | Maximum pages per provider, integer 1–20; public access may stop earlier |
+| `--delay <ms>` | `1200` | Minimum request-start spacing, integer 750–30000; shared by all providers |
+| `--sort <order>` | `recent` | `recent` or `relevant`; provider hint, not a global sort |
+| `--details` | off | Request posting details for candidate enrichment |
+| `--strict` | off | Fetch details and exclude unconfirmed server-facet matches |
+| `--save` | off | Upsert accepted results into the local store |
+| `--format <type>` | `table` | `table`, `json`, `jsonl`, `csv` |
+| `-o, --output <file>` | stdout | Write output; create missing parent folders |
 
-| Argument | Default | Description |
-|---|---|---|
-| `--limit <n>` | `25` | Maximum total results, 1–200, **across all sites combined**. |
-| `--pages <n>` | `5` | Maximum pages scanned **per site**, 1–20. Indeed pagination increments 10; LinkedIn uses returned card count. |
-| `--delay <ms>` | `1200` | Minimum milliseconds between HTTP requests (750–30000). Shared across providers. |
-| `--sort <order>` | `recent` | `recent` or `relevant`; each site may ignore the setting. |
-| `--details` | Off | Request detail pages for enrichment when supported. More requests, higher access-failure risk. |
-| `--strict` | Off | Exclude jobs whose requested filters cannot be independently verified from public data. |
-| `--save` | Off | Store results locally, keyed by **`source:id`** to prevent collisions. |
-| `--format <format>` | `table` | `table`, `json`, `jsonl`, or `csv`. |
-| `-o, --output <path>` | stdout | Write output to a file. Parent directories are created. |
+```bash
+jobs find --search "chef" --website LinkedIn --remote false --employment full-time --details
+jobs find --search "accountant" --company "Example" --experience entry --date 7d --strict
+jobs find --search "teacher" --website LinkedIn Indeed --format json -o results/teachers.json
+```
 
-`--limit` is a cap, **not a minimum**. If one provider fails, `find` prints a warning on stderr and keeps results from the other provider. If both providers fail, the command exits with an error. Output written to stdout in JSON/CSV mode is not mixed with progress messages. Results are interleaved by provider in their requested order, **not globally sorted** by posting time. A listing duplicated across LinkedIn and Indeed remains two source-attributed records; within-provider job IDs are deduplicated.
+Each provider deduplicates by posting ID and stops repeated pages. Results interleave
+in requested provider order and respect the combined limit. Different IDs remain
+distinct even if title/company match; a posting on multiple sites keeps one record
+per site. Results are **not globally sorted** by date.
 
-### `jobs job`
+Errors and progress go to stderr; JSON/CSV/JSONL stdout remains machine-readable.
+One provider failure does not stop the others. A later-page/detail failure retains
+already accepted results with a partial-results warning. If every selected provider
+fails before accepting results, the command exits 1. Successful searches, including
+explicit no-results pages or searches whose candidates all fail filters, exit 0.
+Validation/storage/network failures exit 1.
+
+### Provider filter limitations
+
+| Criterion | LinkedIn | Indeed | Glassdoor |
+| --- | --- | --- | --- |
+| Keywords | Public guest query | Public search query | Public keyword search route |
+| Location | Server query | Server query | Local substring; no geocoding or radius equivalence |
+| Company | Local normalized equality | Local equality plus query hint | Local equality plus query hint |
+| Date | Seconds-based URL facet; prefer observed date | 1/3/7/14-day URL buckets | Observed dates only |
+| Workplace | URL facets plus observed metadata | Remote/hybrid URL mappings; non-remote requires observation | Explicit workplace or location text only |
+| Experience | URL facet plus observed criteria | Limited entry/mid/senior URL mappings | Explicit metadata only; never inferred from title |
+| Employment | URL facet plus observed criteria | Limited job-type URL mappings | Explicit metadata only |
+| Applicant count / verification | Observed component or unconfirmed `true` facet | Unknown excluded | Unknown excluded |
+| Sort | URL hint | URL hint | Site default; requested sort not guaranteed |
+
+A supported server facet may be accepted without independent evidence in normal
+mode, labeled `linkedin-facet-unconfirmed` or `indeed-facet-unconfirmed` and listed
+in `unconfirmedFilters`. `--strict` excludes those matches. A contradictory observed
+attribute always excludes a job. Unsupported criteria with unknown values exclude
+it in both modes. Glassdoor claims no unverified server facets.
+
+Indeed's bucket counts as a date facet only if it equals the requested duration.
+For example, `2d` maps to a 3-day bucket but still requires a locally verifiable date.
+Calendar dates have no exact posting time or timezone; filtering uses a conservative
+timezone envelope and accepts them as confirmed only when that entire interval is
+inside the requested window. Old/future contradictory dates are excluded.
+
+Glassdoor exposes salary text where present, retaining labels such as “Glassdoor
+est.” Structured salary values remain objects. It cannot reliably expose applicant
+counts or job verification, so those fields remain `null`. Public next links are
+followed only if robots.txt permits them. Current `_IP` pagination restrictions,
+client-only “Show more jobs”, login pages, challenges, or unknown HTML produce
+explicit errors/warnings. No hidden API is used to obtain additional pages.
+See [research and live-access evidence](docs/GLASSDOOR_RESEARCH.md).
+
+### `job`
 
 ```bash
 jobs job 1234567890 --website LinkedIn --format json
-jobs job "https://www.linkedin.com/jobs/view/1234567890/" --save
-jobs job abcdef1234567890 --website Indeed --format json
-jobs job "https://www.indeed.com/viewjob?jk=abcdef1234567890" --format json
+jobs job "https://www.indeed.com/viewjob?jk=abcdef1234567890" --save
+jobs job "https://www.glassdoor.com/job-listing/example.htm?jl=100000000001" --format json
 ```
 
-URLs automatically select the provider; with a bare ID, use `--website Indeed` for Indeed keys. `job` supports `--website`, `--format`, `--output`, `--save`, and `--delay`. IDs above are illustrative.
+IDs above are illustrative. Posting URLs select the provider automatically; an
+explicit conflicting `--website` is an error. Bare IDs default to LinkedIn; use
+`--website Indeed` or `--website Glassdoor` for other providers. Glassdoor bare-ID
+detail routes may be disallowed by robots.txt; prefer an actual public posting URL.
+Even a public posting URL may be blocked.
 
-### `jobs saved` and `jobs export`
+Options: `--website <site>` (one), `--delay <ms>` (1200; 750–30000), `--save`,
+`--format table|json|jsonl|csv` (table), `-o/--output <file>` (stdout).
+
+### Local commands
 
 ```bash
-jobs saved --company "Google" --format json --limit 10
-jobs saved --search "sous chef"
-jobs export -o results/all.csv
-jobs export --format jsonl --output results/all.jsonl --search "accountant"
+jobs saved --website Glassdoor Indeed --search "nurse" --limit 50 --format json
+jobs export --website Glassdoor --company "Example" --format jsonl -o results/jobs.jsonl
+jobs stats --website LinkedIn Glassdoor
 ```
 
-Both accept `--search` and `--company` (local case-insensitive matching). `saved` additionally accepts `--limit`, `--format`, `--output`. `export` requires `--output` and accepts `--format json|jsonl|csv` (CSV default). These commands **do not request jobs online**.
+`saved` accepts `--website <sites...>`, `--search <text>`, `--company <name>`,
+`--limit <positive integer>`, `--format table|json|jsonl|csv` (table), and
+`-o/--output <file>`. Without a limit it returns all matching saved rows.
 
-### `jobs stats`
+`export` requires `-o/--output <file>` and accepts `--format json|jsonl|csv` (csv),
+`--search`, `--company`, and `--website`. Search is a local case-insensitive substring
+over title/company/description/location. No new jobs are fetched.
 
-```bash
-jobs stats
-```
+`stats` accepts `--website <sites...>` and returns JSON with `total`, `byWebsite`,
+`byCompany`, `byEmployment`, and `byLocation`. Local commands include all sources
+unless `--website` is supplied.
 
-Returns JSON with `total`, `byWebsite`, `byCompany`, `byEmployment`, and `byLocation` counts of saved entries.
-
-### `jobs url`
-
-```bash
-jobs url --search "electrician" --location "New York"              # prints both URLs
-jobs url --website Indeed --search "chef" --date 1d
-jobs url --website LinkedIn Indeed --search "nurse" --remote true
-```
-
-Uses the same filter arguments as `find`, including multi-value `--website`, but **does not perform an HTTP request**. Provider-specific unsupported conditions (particularly Indeed's `--under` and `--verified`) are *not* included in URLs, even if supplied.
-
-### `jobs doctor`
+### `url` and `doctor`
 
 ```bash
+jobs url --search "electrician" --website LinkedIn Indeed Glassdoor
 jobs doctor
-jobs doctor --probe --website Indeed --search "chef"
-jobs doctor --probe --website LinkedIn --search "accountant"
+jobs doctor --probe --website Glassdoor --search "accountant"
 ```
 
-Reports Node version, storage path, saved count, and optionally the status of **one** public search request for the chosen website. `doctor --probe` does **not** confirm job availability or parsing.
+`url` accepts the search-filter table above and prints URLs in selected order. Local
+filters do not necessarily appear in provider URLs. It accepts no find execution
+options and makes no network requests.
 
-## Normalized results and evidence
+`doctor` accepts `--probe`, `--search <keywords>` (default `chef`, for probing), and
+`--website <sites...>` (all three). It reports Node version, store path/count, and
+selected websites. Probing makes at most one search request per source, plus the
+Glassdoor robots request; it disables retries and validates recognized cards or an
+explicit no-results page. Errors are reported independently and exit 1. A successful
+probe does not establish that every filter, detail page, or subsequent page works.
 
-Example (illustrative, not a live job):
+## Data, exports, and persistence
 
-```json
-{
-  "source": "Indeed",
-  "id": "abcdef1234567890",
-  "title": "Sous Chef",
-  "company": "Example Kitchens",
-  "location": "Los Angeles, CA",
-  "url": "https://www.indeed.com/viewjob?jk=abcdef1234567890",
-  "postedAt": null,
-  "datePrecision": null,
-  "postedText": "2 hours ago",
-  "workplace": null,
-  "employmentType": "Full-time",
-  "seniorityLevel": null,
-  "applicantCount": null,
-  "underTenApplicants": null,
-  "verified": null,
-  "filterEvidence": "indeed-facet-unconfirmed",
-  "unconfirmedFilters": ["date"],
-  "detailsFetched": false
-}
-```
+Normalized records include source, ID, title, company, location, URL, description,
+workplace, employment type, seniority, salary, posting date/precision/text, applicant
+count, under-ten status, verification, fetch timestamp and filter evidence. Missing
+values are `null`. Lower-bound applicant text is not an exact count. JSON and JSONL
+retain full records; CSV includes core fields, salary, description and evidence,
+quotes embedded delimiters/newlines, and neutralizes spreadsheet formula prefixes.
+Tables sanitize terminal control characters.
 
-Dates available only as calendar dates or relative text may not confirm precise hours. Unsupported filter dimensions return `null` (unknown) rather than fabricated `false` or `0`.
-
-- `observed-or-unfiltered`: no selected filter relies on an unobserved server facet.
-- `linkedin-facet-unconfirmed`: a LinkedIn facet may have been used but could not be confirmed from visible public metadata.
-- `indeed-facet-unconfirmed`: an Indeed facet may have been used but could not be confirmed from visible public metadata.
-- `unconfirmedFilters`: which dimensions require review.
-
-`--strict` excludes uncertain matches. Neither site's public search index should be treated as complete or authoritative.
-
-## Storage
-
-Default local store:
-
-- Windows: `%USERPROFILE%\.jobs-cli\jobs.json`
-- macOS/Linux: `~/.jobs-cli/jobs.json`
-
-Override with `JOBS_DB`. The older `LJOBS_DB` variable is also supported for compatibility:
+Default storage is `%USERPROFILE%\.jobs-cli\jobs.json` on Windows and
+`~/.jobs-cli/jobs.json` on macOS/Linux. Override with `JOBS_DB`; the older `LJOBS_DB`
+variable remains supported (`JOBS_DB` takes precedence):
 
 ```powershell
-$env:JOBS_DB = "C:\jobs\saved.json"
+$env:JOBS_DB = ".\data\jobs.json"
 jobs find --search "teacher" --save
 ```
 
@@ -225,42 +244,77 @@ jobs find --search "teacher" --save
 JOBS_DB=./data/jobs.json jobs find --search "teacher" --save
 ```
 
-The original `ljobs` store (`~/.ljobs/jobs.json`) is **not automatically moved**. To use existing data, set `JOBS_DB` to the old file path. Existing unprefixed LinkedIn IDs are migrated individually when you resave the corresponding job. No profile, cookies, or login credentials are required.
+Keys are `source:id`. Legacy source-less rows are LinkedIn; unprefixed keys migrate
+when resaved. The older `~/.ljobs/jobs.json` is not moved automatically; point
+`JOBS_DB` there if needed. Updates use same-directory temporary files and atomic
+rename, serialize writers inside a process, and use an exclusive lock across
+processes. Competing processes receive a descriptive lock error. Corrupt stores are
+reported without overwriting them. A crashed writer can leave a `.lock`; remove it
+only after confirming no process is writing. Keep backups of important saved data.
 
-## Architecture
-
-```text
-bin/jobs.js               Commander CLI entrypoint
-src/cli.js                Commands, validation, output orchestration
-src/filters.js            Cross-site filter normalization / LinkedIn URL mapping
-src/indeed.js             Indeed URL mapping, DOM and embedded JSON parsing, search
-src/parser.js             LinkedIn guest card and detail parsing
-src/search.js             LinkedIn search and multi-provider orchestration
-src/http.js               Shared rate-limited HTTP client, no access-control bypass
-src/store.js              Local JSON store (source-qualified keys)
-src/output.js             Table, CSV, JSON, JSONL formatting
-test/                     Offline unit tests and HTML fixtures
-```
-
-The Indeed parser reads publicly delivered HTML job cards and, if available, JSON already embedded in the HTML. It never executes JavaScript from a scraped page. The Indeed implementation is **best-effort**, since site HTML, allowed access, and pagination can change without notice.
-
-## Testing and troubleshooting
+## Testing and CI
 
 ```bash
-npm test
+npm ci
 npm run lint
-jobs doctor
-jobs doctor --probe --website LinkedIn
+npm test
+npm audit
 ```
 
-- **`jobs: command not found`**: run `npm link` from the project folder or use `node bin/jobs.js`.
-- **HTTP 403/429/999 or challenge**: access is restricted; the CLI **stops** that provider rather than bypassing it. Consider the provider's official website or permitted data channels.
-- **No results**: check `jobs url ...` in a regular browser, widen `--date`, reduce company-specific restrictions, and remove `--strict` to see which source facets are uncertain.
-- **Indeed results missing with `--under` or `--verified`**: expected: applicant counts and verified-job status are not reliably available through the public Indeed search surface.
-- **HTML changed**: adapt selectors/embedded JSON parsing and add a recorded test fixture; do not suppress access challenges.
+The standard tests are deterministic and use fixtures/mocked fetch. They exercise
+real CLI subprocesses, all providers, filters/unknowns, pagination/deduplication,
+failure isolation, retries/timeouts/rate spacing, persistence/concurrent writes,
+exports and regressions. Glassdoor fixtures are synthetic contracts; they are not
+evidence of successful live parsing. Lint performs syntax checks recursively over
+all JavaScript source, tests and scripts.
 
-Automated live fetches have not been verified by the bundled offline fixtures. Live search depends on network permissions and current website HTML; no working result count is guaranteed.
+GitHub Actions runs on pushes and pull requests across Node 20/22/24 on Ubuntu and
+Windows. It runs `npm ci`, lint, tests and offline CLI checks. Actions are pinned to
+immutable revisions and have read-only repository permissions. No live scraping
+runs in CI; dependency installation still requires the npm registry.
 
-## License
+Optional live checks, using one page per selected provider, no details and no retries:
 
-MIT. Independent software, not affiliated with, endorsed by, or officially supported by LinkedIn or Indeed.
+```bash
+npm run test:live
+npm run test:live -- LinkedIn Glassdoor
+```
+
+Set `JOBS_SMOKE_SEARCH` to change the default `accountant` keyword. The script emits
+one JSON status per provider and exits 1 for blocked, invalid or inconclusive empty
+results. Run only where authorized. On **2026-10-27**, the live check parsed three
+LinkedIn cards; Indeed and Glassdoor returned HTTP 403. Their live extraction remains
+unverified. Offline tests do not establish future website availability.
+
+## Troubleshooting
+
+- **403/429/999, login or CAPTCHA:** the provider stops. Choose another provider or
+  use the site's official interface; no bypass is included.
+- **Unrecognized HTML:** markup may have changed or require client rendering. This
+  is a provider error, not an invented successful empty result.
+- **No accepted results:** relax filters, inspect JSON evidence, or increase the page
+  cap. `--limit` is a maximum, not a promised minimum.
+- **Glassdoor location mismatches:** local substring matching does not expand city
+  aliases, regions, distance or country names. Missing location excludes a match.
+- **Missing date/type/applicant metadata:** `--details` may help on accessible pages;
+  it cannot establish attributes the provider does not expose.
+- **Slow searches:** requests share one lane (concurrency 1), minimum spacing and a
+  15-second per-attempt timeout covering headers and body. Network/timeouts and
+  HTTP 500/502/503/504 get at most two retries with bounded backoff. Restrictions,
+  challenges and ordinary 4xx errors are never retried.
+- **Store error:** confirm `JOBS_DB`, directory permissions and JSON validity. A
+  blocked writer or failed save exits with a descriptive error.
+
+## Architecture and engineering notes
+
+`src/providers.js` registers provider descriptors. `provider-search.js` owns the
+shared pagination/filtering loop; `linkedin.js`, `indeed.js`, `glassdoor.js` and
+`parser.js` own site behavior. `http.js` provides the shared request queue,
+`filters.js` validates options and evidence, `schema.js` handles nullable fields and
+JSON-LD, and `store.js`/`output.js` handle persistence/exports. The CLI orchestrates
+these modules. No browser automation dependency is required.
+
+See the [quality audit](docs/QUALITY_AUDIT.md) for findings and fixes and the
+[engineering summary](docs/ENGINEERING_SUMMARY.md) for validation and remaining work.
+
+MIT licensed. Independent software; not affiliated with LinkedIn, Indeed or Glassdoor.

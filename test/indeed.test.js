@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import {normalizeOptions} from '../src/filters.js';
-import {makeIndeedUrl, parseIndeedCards, extractJsonAssignment, indeedJobId, findIndeedJobs} from '../src/indeed.js';
+import {makeIndeedUrl, parseIndeedCards, extractJsonAssignment, indeedJobId, findIndeedJobs, parseIndeedDetail} from '../src/indeed.js';
 
 const fixture = async name => readFile(new URL(`./fixtures/${name}`, import.meta.url), 'utf8');
 test('Indeed URLs translate portable options only', () => {
@@ -50,4 +50,12 @@ test('Indeed excludes unknown under-10 and verification, rather than assuming Li
   const result = await findIndeedJobs(o, http);
   assert.equal(result.jobs.length, 0);
   assert.equal(result.stats.unknownExcluded, 2);
+});
+
+test('Indeed changed structured markup cannot masquerade as an empty result', async () => {
+  await assert.rejects(findIndeedJobs(normalizeOptions({search:'chef'}),{get:async () => '<script>window.mosaic.providerData["mosaic-provider-jobcards"]={"newSchema":true}</script>'}),/unrecognized search HTML/);
+});
+test('Indeed detail decodes structured descriptions without changing the source text', () => {
+  const job = parseIndeedDetail('<script type="application/ld+json">{"@type":"JobPosting","title":"Chef","hiringOrganization":{"name":"Bakery"},"description":"<p>Bake &amp; decorate</p>"}</script>');
+  assert.equal(job.description,'Bake & decorate');
 });

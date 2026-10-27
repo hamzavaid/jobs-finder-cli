@@ -77,6 +77,11 @@ export function parseGlassdoorDetail(html, fallback = {}) {
   const ld = entries.find(entry => {
     try {return glassdoorJobId(entry.url) === fallback.id;} catch {return false;}
   }) || (entries.length === 1 ? entries[0] : null);
+  if (ld?.url && fallback.id) {
+    let observedId;
+    try {observedId = glassdoorJobId(ld.url);} catch { /* Metadata may link an employer's own posting. */ }
+    if (observedId && observedId !== fallback.id) throw new Error('Glassdoor: detail metadata belongs to a different posting; refusing to merge distinct jobs.');
+  }
   const fields = structuredFields(ld || {});
   const read = selector => clean($(selector).first().text()) || null;
   const title = fields.title || read('[data-test="jobTitle"], [data-test="job-title"], h1');

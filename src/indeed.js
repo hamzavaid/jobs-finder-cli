@@ -169,7 +169,7 @@ export function parseIndeedDetail(html, fallback = {}) {
   fallback = mergeKnown(fallback, structuredFields(ld));
   const title = clean($('h1.jobsearch-JobInfoHeader-title, h1').first().text()) || ld?.title || fallback.title || null;
   const company = clean($('[data-testid="inlineHeader-companyName"], .jobsearch-InlineCompanyRating').first().text()) || ld?.hiringOrganization?.name || fallback.company || null;
-  const description = clean($('#jobDescriptionText').text()) || clean(ld?.description?.replace?.(/<[^>]+>/g,' ')) || fallback.description || null;
+  const description = clean($('#jobDescriptionText').text()) || fallback.description || null;
   const date = parseDate(ld?.datePosted);
   return normalizeJob({...fallback, source:'Indeed', title, company, description, postedAt:date.postedAt || fallback.postedAt || null,
     datePrecision:date.datePrecision || fallback.datePrecision || null, detailsFetched:true, fetchedAt:new Date().toISOString()});
@@ -180,6 +180,6 @@ export const indeedProvider = {
   parseDetail:parseIndeedDetail, jobId:indeedJobId,
   detailUrl:id => `https://www.indeed.com/viewjob?jk=${encodeURIComponent(id)}`,
   facets:indeedFacets, pageSize:10,
-  emptyPattern:/jobs-search-results-list|mosaic-provider-jobcards|no (?:matching )?jobs found|did not match any jobs/i
+  emptyPattern:/no (?:matching )?jobs found|did not match any jobs|data-testid=["\']no-results["\']/i
 };
 export function findIndeedJobs(options, http) {return searchProvider(indeedProvider, options, http);}

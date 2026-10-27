@@ -77,3 +77,32 @@ action revisions. CI itself has not run on GitHub during this session. Optional 
 smoke script is outside standard test discovery and never runs in CI. Live results:
 LinkedIn parsed three normalized cards from one page; Indeed and Glassdoor each
 returned HTTP 403 and stopped. No working Indeed/Glassdoor extraction claim is made.
+
+## Final review findings and disposition
+
+| ID | Severity | Root cause | Resolution |
+| --- | --- | --- | --- |
+| Q15 | High | Variadic argument collector spreads individual strings into characters. | Fixed collector shape handling; actual CLI subprocess regressions. |
+| Q16 | High | LinkedIn generic verified badges can describe an employer; negative card badges can match a positive substring. | Require explicit job-specific verification evidence; test employer and negative cases. |
+| Q17 | High | Day-precision dates were never checked for definite old/future contradictions. | Conservative UTC-14 through UTC+14 interval evaluation, with boundary regressions. |
+| Q18 | High | Glassdoor single JobPosting fallback could attach another posting's metadata to a requested ID. | Reject a mismatched verifiable listing ID; test refusal to merge. |
+| Q19 | Medium | Taxonomy substring checks interpret International as internship and Associate Director as associate; combined employment types collapse to one. | Word boundaries, seniority specificity, and membership across explicit employment values. |
+| Q20 | Medium | Generic Indeed card-container marker permits unknown schemas to look like successful empty results. | Require explicit no-results evidence when parsing yields no cards; regression fixture. |
+| Q21 | Medium | Structured descriptions are reprocessed by a tag regex, leaving entities encoded; URL IDs can come from query text; stored IDs reach tables unsanitized. | Reuse structured text decoding, validate posting paths, sanitize every table field. |
+| Q22 | Low | Transitive whatwg-encoding dependency is deprecated. | Retained current Cheerio to avoid unrelated migration; npm audit reports zero known advisories. |
+
+Phase 6: comprehensive README and engineering summary completed. Q01–Q21 are
+resolved; Q22 is a documented maintenance item. Original CLI construction failure
+was independently reproduced with Commander reporting conflicting `--website`
+declarations. Final deterministic suite: **73/73 pass** on Windows with Node
+20/22/24/25. Clean installation, full syntax lint, advisory check and diff whitespace
+check pass. Workflow YAML parses; manual review confirms read-only permissions,
+immutable official action references, disabled persisted checkout credentials,
+bounded jobs and no live scraping. Hosted Ubuntu/Windows workflow execution is
+pending a future push/PR; it is not claimed to have run here.
+
+Final live checks repeated after parser fixes: LinkedIn parsed three cards;
+Indeed/Glassdoor returned HTTP 403. Remaining limitations are external access,
+public pagination availability, local Glassdoor location matching, synthetic fixture
+provenance, syntax-only lint, and manual stale-lock recovery. See
+[ENGINEERING_SUMMARY.md](ENGINEERING_SUMMARY.md) for detailed evidence and follow-up.

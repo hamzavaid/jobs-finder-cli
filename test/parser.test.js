@@ -32,3 +32,11 @@ test('canonicalJobId works with an ID, url and URN', () => {
   assert.equal(canonicalJobId('https://www.linkedin.com/jobs/view/chef-at-acme-1234567890?foo=bar'), '1234567890');
   assert.equal(canonicalJobId('urn:li:jobPosting:1234567890'), '1234567890');
 });
+
+test('employer verification does not imply a verified job and URL query text is not a posting path', () => {
+  const detail = '<h1 class="topcard__title">Chef</h1><div aria-label="Verified employer"></div>';
+  assert.equal(parseJobDetail(detail).verified,null);
+  assert.equal(parseJobDetail(detail + '<div aria-label="Job is not verified"></div>').verified,false);
+  assert.throws(() => canonicalJobId('https://www.linkedin.com/login?redirect=/jobs/view/123456789'));
+  assert.throws(() => canonicalJobId('https://user:pass@www.linkedin.com/jobs/view/123456789'));
+});

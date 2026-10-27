@@ -46,3 +46,12 @@ test('404 and challenge responses are never retried; one failure does not poison
   await assert.rejects(http.get('https://example.com/404'),/HTTP 404/);
   assert.equal(calls,1); assert.equal(await http.get('https://example.com/ok'),'ok');
 });
+
+test('HTTP stops on redirected login/checkpoint even when response includes stale cards', async () => {
+  let calls = 0;
+  const http = createHttpClient({delayMs:0,fetchImpl:async () => {
+    calls++; return {ok:true,status:200,url:'https://www.linkedin.com/authwall',text:async () => '<div class="base-search-card">old card</div>'};
+  }});
+  await assert.rejects(http.get('https://www.linkedin.com/jobs'),/login or access checkpoint/);
+  assert.equal(calls,1);
+});

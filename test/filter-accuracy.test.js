@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {normalizeOptions, evaluateJob, parseDuration, normalizeWebsites} from '../src/filters.js';
+import {normalizeOptions, evaluateJob, parseDuration, normalizeWebsites, knownEmployment, knownExperience} from '../src/filters.js';
 import {indeedFacets} from '../src/indeed.js';
 const o = extra => normalizeOptions({search:'electrician',...extra});
 test('all boolean spellings, date boundaries and conflicting choices validate', () => {
@@ -36,4 +36,18 @@ test('strict removes only unverified facets; unknown false never means observed 
   const loose = o({under:'true'}), strict = {...loose,strict:true};
   assert.equal(evaluateJob({source:'LinkedIn'},loose).match,true);
   assert.equal(evaluateJob({source:'LinkedIn'},strict).match,false);
+});
+
+test('calendar dates reject definite contradictions and verify only fully enclosed intervals', () => {
+  const now = Date.parse('2026-10-27T12:00:00Z');
+  assert.equal(evaluateJob({postedAt:'2020-01-01',datePrecision:'day'},o({date:'1d'}),now).match,false);
+  assert.equal(evaluateJob({postedAt:'2099-01-01',datePrecision:'day'},o({date:'1d'}),now).match,false);
+  assert.equal(evaluateJob({source:'Glassdoor',postedAt:'2026-10-24',datePrecision:'day'},o({date:'7d',strict:true}),now).match,true);
+  assert.equal(evaluateJob({source:'Glassdoor',postedAt:'bad',datePrecision:'day'},o({date:'7d'}),now).match,false);
+});
+test('taxonomy matching preserves multiple types and avoids substring inventions', () => {
+  assert.equal(knownEmployment('International'),null); assert.equal(knownEmployment('Other'),'O');
+  assert.equal(knownExperience('Associate Director'),'5'); assert.equal(knownExperience('Senior Director'),'5');
+  assert.equal(evaluateJob({source:'Glassdoor',employmentType:'FULL_TIME, CONTRACT'},o({employment:'contract'})).match,true);
+  assert.equal(evaluateJob({source:'Glassdoor',employmentType:'International'},o({employment:'internship'})).match,false);
 });

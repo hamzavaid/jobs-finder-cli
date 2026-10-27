@@ -9,14 +9,15 @@ const first = ($el, selectors) => {
   return null;
 };
 export function canonicalJobId(value) {
-  const str = String(value || '');
+  let str = String(value || '').trim();
   if (/^[a-z]+:\/\//i.test(str)) {
     const url = new URL(str);
-    if (url.protocol !== 'https:' || !/(^|\.)linkedin\.com$/i.test(url.hostname)) throw new Error('Expected a LinkedIn HTTPS job URL.');
+    if (url.protocol !== 'https:' || !/(^|\.)linkedin\.com$/i.test(url.hostname) || url.username || url.password || url.port) throw new Error('Expected a LinkedIn HTTPS job URL.');
+    str = url.pathname;
   }
-  const id = /(?:jobPosting:|\/jobs\/view\/(?:[^/?]*?-)?|\/jobPosting\/)(\d{5,})/.exec(str)?.[1];
-  if (id) return id;
   if (/^\d{5,}$/.test(str)) return str;
+  const id = /^(?:urn:li:jobPosting:|\/jobs\/view\/(?:[^/?]*?-)?|\/jobs-guest\/jobs\/api\/jobPosting\/)(\d{5,})(?:\/|$)/.exec(str)?.[1];
+  if (id) return id;
   throw new Error('Expected a LinkedIn job ID or a LinkedIn jobs/view URL.');
 }
 function postedData($el) {
@@ -56,7 +57,7 @@ export function parseSearchCards(html) {
     const sourceUrl = link.attr('href') || null;
     if (!title || !company) return;
     const badges = clean(node.find('[aria-label], .job-search-card__benefits, .job-search-card__verified').map((_, e) => $(e).attr('aria-label') || $(e).text()).get().join(' '));
-    const explicitVerified = /\b(verified job|job is verified|has verifications)\b/i.test(badges) ? true : null;
+    const explicitVerified = /\b(?:not verified job|job (?:is )?not verified)\b/i.test(badges) ? false : /\b(?:verified job|job is verified)\b/i.test(badges) ? true : null;
     jobs.push({
       id, source: 'LinkedIn', title, company, location, url:`https://www.linkedin.com/jobs/view/${id}/`,
       sourceUrl, postedAt, datePrecision, postedText: postedText || context || null,
@@ -117,10 +118,12 @@ export function parseJobDetail(html, fallback = {}) {
       result.applicantCount = null; // lower bound, not an exact number
     }
   }
-  const aria = $('[aria-label*="Verified"], [aria-label*="verified"], .verified-badge, .job-verification-badge')
-    .map((_, el) => `${$(el).attr('aria-label') || ''} ${$(el).text()}`).get().join(' ');
-  if (/\bverified\b/i.test(aria) && !/not verified/i.test(aria)) result.verified = true;
-  if (/\bnot verified\b/i.test(aria)) result.verified = false;
+  const badge = $('[aria-label], .job-verification-badge').map((_, el) => {
+    const node = $(el);
+    return node.hasClass('job-verification-badge') ? `Job is ${clean(node.text())}` : node.attr('aria-label');
+  }).get().join(' ');
+  if (/\b(?:not verified job|job (?:is )?not verified)\b/i.test(badge)) result.verified = false;
+  else if (/\b(?:verified job|job is verified)\b/i.test(badge)) result.verified = true;
   // Avoid matching 'remote' mentioned only in the job description.
   const surroundings = [
     first(root, ['.topcard__flavor--metadata', '.top-card-layout__third-subline']),

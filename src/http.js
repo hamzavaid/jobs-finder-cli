@@ -33,6 +33,7 @@ export function createHttpClient({delayMs = 1200, timeoutMs = 15000, retries = 2
               'User-Agent':'jobs-cli/2.0 (public job listings reader; no browser automation)'},
             signal:controller.signal, redirect:'follow'
           });
+          if (response.url && /\/(?:authwall|checkpoint|login|signin|member\/profile\/login)(?:[/?]|$)/i.test(new URL(response.url).pathname)) throw new AccessError(`${host}: login or access checkpoint required.`);
           if ([401,403,429,999].includes(response.status)) throw new AccessError(`${host} returned HTTP ${response.status}; access is restricted. Use the official website.`, response.status);
           if (!response.ok) throw new AccessError(`HTTP ${response.status} from ${host}.`, response.status);
           const body = await response.text();

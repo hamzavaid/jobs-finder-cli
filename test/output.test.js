@@ -18,7 +18,7 @@ test('CSV exports stable fields, multiline quotes, salary/description and neutra
   assert.equal(csvCell(null),'""'); assert.equal(csvCell(false),'"false"');
 });
 test('table sanitizes terminal controls and serializer rejects unsupported formats', () => {
-  const table = serializeJobs([{title:'Chef\x1b[31m\nOverwrite',source:'Glassdoor'}]);
+  const table = serializeJobs([{title:'Chef\x1b[31m\nOverwrite',source:'Glassdoor',id:'123\x1b[2J'}]);
   assert.ok(!table.includes('\x1b')); assert.ok(!table.includes('m\nOverwrite'));
   assert.throws(() => serializeJobs(rows,'xml'), /Unknown output format/);
 });

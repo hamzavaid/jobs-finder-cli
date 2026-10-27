@@ -48,3 +48,8 @@ test('Glassdoor rejects login, challenges and unknown HTML; explicit no results 
   const empty = await findGlassdoorJobs(options({pages:1}),{get:async url => url.endsWith('/robots.txt') ? allow : '<div data-test="no-results">No jobs found</div>'});
   assert.equal(empty.jobs.length,0);
 });
+
+test('Glassdoor detail never merges a different posting and unavailable crawl policy fails explicitly', async () => {
+  assert.throws(() => parseGlassdoorDetail('<script type="application/ld+json">{"@type":"JobPosting","title":"Nurse","url":"https://www.glassdoor.com/job-listing/nurse.htm?jl=100000000003"}</script>',{id:'100000000004'}),/different posting/);
+  await assert.rejects(findGlassdoorJobs(options({pages:1}),{get:async () => '<html>robots page unavailable</html>'}),/robots.txt could not be verified/);
+});

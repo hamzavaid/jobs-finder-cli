@@ -125,8 +125,15 @@ export function evaluateJob(job, o, now = Date.now()) {
       const t = Date.parse(job.postedAt);
       if (!Number.isFinite(t)) unknowns.push('date');
       else if (t > now || now - t > o.dateSeconds * 1000) failures.push('date');
+    } else if (job.postedAt && job.datePrecision === 'day') {
+      const day = Date.parse(job.postedAt);
+      // Calendar dates have no source timezone: allow the full UTC-14..UTC+14 envelope.
+      const earliest = day - 14 * 3600000, latest = day + 38 * 3600000;
+      const cutoff = now - o.dateSeconds * 1000;
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(job.postedAt) || !Number.isFinite(day)) unknowns.push('date');
+      else if (latest < cutoff || earliest > now) failures.push('date');
+      else if (earliest < cutoff || latest > now) (hasFacet('date') ? facetReliant : unknowns).push('date');
     } else {
-      // A day-only date cannot establish a precise 24-hour window.
       (hasFacet('date') ? facetReliant : unknowns).push('date');
     }
   }
@@ -157,8 +164,11 @@ export function evaluateJob(job, o, now = Date.now()) {
   }
   if (o.employment) {
     if (!job.employmentType) markUnknown('employment');
-    else if (!knownEmployment(job.employmentType)) markUnknown('employment');
-    else if (EMPLOYMENT[o.employment] !== knownEmployment(job.employmentType)) failures.push('employment');
+    else {
+      const types = [job.employmentType].flat().flatMap(v => String(v).split(/[,;/|]|\s+and\s+/i)).map(knownEmployment).filter(Boolean);
+      if (!types.length) markUnknown('employment');
+      else if (!types.includes(EMPLOYMENT[o.employment])) failures.push('employment');
+    }
   }
   if (failures.length) return {match: false, failures, unknowns, facetReliant};
   if (unknowns.length || (o.strict && facetReliant.length)) return {match: false, failures, unknowns, facetReliant};
@@ -168,33 +178,35 @@ export function normalizeWorkplace(input) {
   const s = String(input || '').toLowerCase().replaceAll('_','-');
   if (/\bhybrid\b/.test(s)) return 'hybrid';
   if (/\b(on[- ]?site|in[- ]?person)\b/.test(s)) return 'onsite';
+  if (/\b(?:not|no) remote\b/.test(s)) return null;
   if (/\bremote\b/.test(s)) return 'remote';
   return null;
 }
 export function knownExperience(input) {
   const s = String(input || '').toLowerCase().replaceAll('_','-');
-  if (/intern/.test(s)) return '1';
-  if (/entry|junior/.test(s)) return '2';
-  if (/associate/.test(s)) return '3';
-  if (/mid|senior/.test(s)) return '4';
-  if (/director/.test(s)) return '5';
-  if (/executive/.test(s)) return '6';
+  if (/\bexecutive\b/.test(s)) return '6';
+  if (/\bdirector\b/.test(s)) return '5';
+  if (/\b(?:intern|internship)\b/.test(s)) return '1';
+  if (/\b(?:entry|junior)\b/.test(s)) return '2';
+  if (/\b(?:mid|senior)\b/.test(s)) return '4';
+  if (/\bassociate\b/.test(s)) return '3';
   return null;
 }
 export function knownEmployment(input) {
   const s = String(input || '').toLowerCase().replaceAll('_','-');
-  if (/intern/.test(s)) return 'I';
+  if (/\b(?:intern|internship)\b/.test(s)) return 'I';
   if (/part[- ]?time/.test(s)) return 'P';
   if (/full[- ]?time/.test(s)) return 'F';
   if (/contract/.test(s)) return 'C';
   if (/temporary/.test(s)) return 'T';
-  if (/volunteer/.test(s)) return 'V';
+  if (/\bvolunteer\b/.test(s)) return 'V';
+  if (/^other$/.test(s.trim())) return 'O';
   return null;
 }
 
 export function validateOutputOptions(input) {
   if (input.format && !['table','json','jsonl','csv'].includes(input.format)) throw new Error('--format must be table, json, csv or jsonl.');
   if (input.delay !== undefined) integerBetween(input.delay,750,30000,'--delay');
-  if (input.limit !== undefined) integerBetween(input.limit,1,200,'--limit');
+  if (input.limit !== undefined) integerBetween(input.limit,1,Number.MAX_SAFE_INTEGER,'--limit');
   return input;
 }

@@ -49,3 +49,5 @@ it does not execute Python or adopt the reference project's curated seed list.
 ## Phase log
 
 1. Repository audit and architecture recorded before implementation. Baseline passes.
+
+2. Added dedicated Greenhouse, Lever (global/EU), and Ashby JSON adapters. Five deterministic adapter tests and lint pass. Timestamps, workplace ambiguity, malformed payloads and pagination are covered. Live API verification is pending the transport/discovery pipeline.

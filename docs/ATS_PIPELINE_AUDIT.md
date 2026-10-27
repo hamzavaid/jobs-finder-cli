@@ -51,3 +51,5 @@ it does not execute Python or adopt the reference project's curated seed list.
 1. Repository audit and architecture recorded before implementation. Baseline passes.
 
 2. Added dedicated Greenhouse, Lever (global/EU), and Ashby JSON adapters. Five deterministic adapter tests and lint pass. Timestamps, workplace ambiguity, malformed payloads and pagination are covered. Live API verification is pending the transport/discovery pipeline.
+
+3. Implemented bounded, resumable CDX discovery and a public Common Crawl fallback. Candidate extraction is host-restricted; HEAD validation falls back to JSON GET only for unreliable method responses. Temporary failures preserve prior validity. Five deterministic discovery groups pass. Persistence is injected and implemented in phase 4.

@@ -10,6 +10,10 @@ const first = ($el, selectors) => {
 };
 export function canonicalJobId(value) {
   const str = String(value || '');
+  if (/^[a-z]+:\/\//i.test(str)) {
+    const url = new URL(str);
+    if (url.protocol !== 'https:' || !/(^|\.)linkedin\.com$/i.test(url.hostname)) throw new Error('Expected a LinkedIn HTTPS job URL.');
+  }
   const id = /(?:jobPosting:|\/jobs\/view\/(?:[^/?]*?-)?|\/jobPosting\/)(\d{5,})/.exec(str)?.[1];
   if (id) return id;
   if (/^\d{5,}$/.test(str)) return str;
@@ -68,6 +72,7 @@ export function parseSearchCards(html) {
 export function parseJobDetail(html, fallback = {}) {
   const $ = load(html || '');
   const id = fallback.id;
+  if (!$("h1.top-card-layout__title, h1.topcard__title, .show-more-less-html__markup, .description__text, .num-applicants__caption").length) throw new Error('LinkedIn: unrecognized job detail HTML.');
   const result = {
     id: null, source: 'LinkedIn', title: null, company: null, location: null, postedAt: null,
     datePrecision: null, postedText: null, workplace: null,
@@ -107,7 +112,8 @@ export function parseJobDetail(html, fallback = {}) {
       result.applicantCount = Number(match[1].replaceAll(',', ''));
       result.underTenApplicants = result.applicantCount < 10;
     } else if (/over\s+(\d[\d,]*)\s+applicants?/i.test(applicantsText)) {
-      result.underTenApplicants = false;
+      const lowerBound = Number(/over\s+([\d,]+)/i.exec(applicantsText)[1].replaceAll(',', ''));
+      result.underTenApplicants = lowerBound >= 9 ? false : null;
       result.applicantCount = null; // lower bound, not an exact number
     }
   }

@@ -3,7 +3,7 @@ import {dirname} from 'node:path';
 export const fields = [
   'source', 'id', 'title', 'company', 'location', 'workplace', 'employmentType',
   'seniorityLevel', 'postedAt', 'postedText', 'applicantCount',
-  'underTenApplicants', 'verified', 'filterEvidence', 'url'
+  'underTenApplicants', 'verified', 'filterEvidence', 'url', 'salary', 'description', 'datePrecision', 'unconfirmedFilters'
 ];
 export function csvCell(value) {
   let s = value == null ? '' : typeof value === 'object' ? JSON.stringify(value) : String(value);
@@ -12,10 +12,11 @@ export function csvCell(value) {
   return `"${s.replaceAll('"', '""')}"`;
 }
 const short = (text, len) => {
-  const s = text == null ? '—' : String(text);
+  const s = text == null ? '—' : String(text).replace(/[\x00-\x1f\x7f-\x9f]/g, ' ');
   return s.length > len ? s.slice(0, len - 1) + '…' : s.padEnd(len);
 };
 export function serializeJobs(jobs, format = 'table') {
+  if (!['table','json','jsonl','csv'].includes(format)) throw new Error(`Unknown output format: ${format}`);
   if (format === 'json') return JSON.stringify(jobs, null, 2) + '\n';
   if (format === 'jsonl') return jobs.map(job => JSON.stringify(job)).join('\n') + (jobs.length ? '\n' : '');
   if (format === 'csv') {

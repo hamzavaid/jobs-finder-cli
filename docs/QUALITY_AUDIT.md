@@ -39,3 +39,15 @@ Neither HTML fixtures nor URL parameters prove a live provider honors a filter.
 
 Phase 1: audit recorded before source changes. No failing baseline tests. Registry
 advisory verification pending a successful network request.
+
+Phase 2: repaired Q01?Q12: removed duplicate doctor option; validated local CLI
+limits/formats/delays; serialized HTTP including body timeouts, bounded transient
+retries and disposal; rejected unknown search markup; introduced provider descriptors,
+a shared search loop and normalized nullable schema; preserved partial results with
+warnings; corrected applicant lower bounds, invalid timestamps and foreign job URLs;
+added JSON-LD graph detail extraction; serialized/locked atomic persistence with
+cleanup, legacy migration, schema validation and linear stats; extended exports and
+sanitized table control characters. Prototype-chain choice names also now reject.
+Coarse Indeed date buckets are only considered a facet when they exactly equal the
+requested window. Baseline 31 tests still pass; nine regression groups added, 40/40
+pass. Cross-process store contention fails explicitly instead of silently losing data.

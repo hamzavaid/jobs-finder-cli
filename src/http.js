@@ -1,48 +1,58 @@
-/** Polite guest-page HTTP client: no login, proxy rotation or anti-bot bypass. */
+/** Serialized, bounded public-page HTTP client. Never retries restricted access. */
 export class AccessError extends Error {
-  constructor(message, status) {super(message); this.name = 'AccessError'; this.status = status;}
+  constructor(message, status = 0) {super(message); this.name = 'AccessError'; this.status = status;}
 }
-export function createHttpClient({delayMs = 1200, timeoutMs = 15000, fetchImpl = globalThis.fetch} = {}) {
-  let nextAllowed = 0;
-  const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
-  async function get(url) {
-    for (let attempt = 0; attempt < 3; attempt++) {
-      const wait = Math.max(0, nextAllowed - Date.now());
+export function assertPublicHtml(body) {
+  if (/<title[^>]*>\s*(?:just a moment|access denied|sign in|log in)|<[^>]+(?:id|class)=["'][^"']*(?:captcha-container|cf-challenge)|security (?:check|verification)|unusual (?:activity|traffic)|bot-detection-anonymous|verify (?:you are|you're) human|captcha\s*(?:required|challenge)|<h\d[^>]*>[^<]*captcha/i.test(body)) {
+    throw new AccessError('Access challenge or login required. This CLI does not bypass access controls.');
+  }
+}
+export function createHttpClient({delayMs = 1200, timeoutMs = 15000, retries = 2,
+  fetchImpl = globalThis.fetch, sleep = ms => new Promise(resolve => setTimeout(resolve, ms)), now = Date.now} = {}) {
+  if (!Number.isFinite(delayMs) || delayMs < 0 || !Number.isFinite(timeoutMs) || timeoutMs <= 0 || !Number.isInteger(retries) || retries < 0 || retries > 5) throw new Error('Invalid HTTP delay, timeout or retry configuration.');
+  let nextAllowed = 0, queue = Promise.resolve();
+  async function request(url) {
+    const host = new URL(url).hostname;
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      const wait = Math.max(0, nextAllowed - now());
       if (wait) await sleep(wait);
-      nextAllowed = Date.now() + delayMs;
+      nextAllowed = now() + delayMs;
+      const controller = new AbortController();
+      let timer;
+      const timeout = new Promise((_, reject) => {
+        timer = setTimeout(() => {
+          controller.abort();
+          reject(new AccessError(`Request timed out (${timeoutMs} ms) from ${host}.`));
+        }, timeoutMs);
+      });
       let response;
       try {
-        response = await fetchImpl(url, {
-          headers: {
-            'Accept': 'text/html,application/xhtml+xml',
-            'Accept-Language': 'en-US,en;q=0.8',
-            'User-Agent': 'jobs-cli/2.0 (public job listings reader; no browser automation)'
-          },
-          signal: AbortSignal.timeout(timeoutMs),
-          redirect: 'follow'
-        });
-      } catch (err) {
-        if (err?.name === 'TimeoutError' || err?.name === 'AbortError') {
-          throw new AccessError(`Request timed out (${timeoutMs} ms).`, 0);
-        }
-        throw new AccessError(`Network request failed: ${err.message}`, 0);
-      }
-      const host = new URL(url).hostname;
-      if ([401, 403, 429, 999].includes(response.status)) {
-        throw new AccessError(`${host} returned HTTP ${response.status}; access is restricted. Use the official website.`, response.status);
-      }
-      if (response.status >= 500 && attempt < 2) {
-        await sleep(Math.max(delayMs, 1000 * (attempt + 1)));
-        continue;
-      }
-      if (!response.ok) throw new AccessError(`HTTP ${response.status} from ${host}.`, response.status);
-      const body = await response.text();
-      if (/captcha|security (check|verification)|unusual activity|bot-detection-anonymous|just a moment/i.test(body) && !/base-search-card|data-jk=|mosaic-provider-jobcards/i.test(body)) {
-        throw new AccessError('Access challenge encountered. This CLI does not bypass access controls.', response.status);
-      }
-      return body;
+        const operation = (async () => {
+          response = await fetchImpl(url, {
+            headers: {'Accept':'text/html,application/xhtml+xml', 'Accept-Language':'en-US,en;q=0.8',
+              'User-Agent':'jobs-cli/2.0 (public job listings reader; no browser automation)'},
+            signal:controller.signal, redirect:'follow'
+          });
+          if ([401,403,429,999].includes(response.status)) throw new AccessError(`${host} returned HTTP ${response.status}; access is restricted. Use the official website.`, response.status);
+          if (!response.ok) throw new AccessError(`HTTP ${response.status} from ${host}.`, response.status);
+          const body = await response.text();
+          assertPublicHtml(body);
+          return body;
+        })();
+        return await Promise.race([operation, timeout]);
+      } catch (error) {
+        controller.abort();
+        await response?.body?.cancel?.().catch(() => {});
+        const status = error.status || 0;
+        const transient = !(error instanceof AccessError) || /timed out/.test(error.message) || [500,502,503,504].includes(status);
+        if (!transient || attempt === retries) throw error instanceof AccessError ? error : new AccessError(`Network request failed from ${host}: ${error.message}`);
+      } finally {clearTimeout(timer);}
+      await sleep(Math.max(delayMs, 1000 * (attempt + 1)));
     }
-    throw new AccessError('Job site returned repeated server errors.', 503);
   }
-  return {get};
+  return {get(url) {
+    const result = queue.then(() => request(url));
+    queue = result.catch(() => {});
+    return result;
+  }};
 }

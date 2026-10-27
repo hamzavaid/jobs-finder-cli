@@ -1,6 +1,8 @@
 /** Indeed public HTML reader. Does not impersonate browsers, login, bypass challenges, or use hidden APIs. */
 import {load} from 'cheerio';
-import {normalizeCompany, evaluateJob, normalizeWorkplace} from './filters.js';
+import {normalizeWorkplace} from './filters.js';
+import {searchProvider} from './provider-search.js';
+import {structuredJobs, structuredFields, mergeKnown, normalizeJob} from './schema.js';
 
 const clean = value => String(value ?? '').replace(/\s+/g, ' ').trim();
 const textValue = value => typeof value === 'string' || typeof value === 'number' ? clean(value)
@@ -20,7 +22,7 @@ export function indeedDateBucket(seconds) {
 }
 export function indeedFacets(o) {
   const out = [];
-  if (o.dateSeconds && indeedDateBucket(o.dateSeconds)) out.push('date');
+  if (o.dateSeconds && indeedDateBucket(o.dateSeconds) * 86400 === o.dateSeconds) out.push('date');
   if (o.employment && typeMap[o.employment]) out.push('employment');
   if (o.experience && expMap[o.experience]) out.push('experience');
   if (o.remote === true || ['remote','hybrid'].includes(o.workplace)) out.push('workplace', 'remote');
@@ -101,7 +103,7 @@ export function indeedJobId(value) {
   if (canonicalIndeedId(value) && !/^https?:/i.test(value)) return String(value);
   try {
     const u = new URL(value);
-    if (!/(^|\.)indeed\.com$/i.test(u.hostname)) throw new Error('Not an Indeed URL');
+    if (u.protocol !== 'https:' || !/(^|\.)indeed\.com$/i.test(u.hostname)) throw new Error('Not an Indeed URL');
     const id = u.searchParams.get('jk') || u.searchParams.get('vjk');
     if (canonicalIndeedId(id)) return id;
   } catch { /* invalid; handled below */ }
@@ -162,61 +164,22 @@ export function parseIndeedCards(html) {
 }
 export function parseIndeedDetail(html, fallback = {}) {
   const $ = load(html || '');
-  let ld = null;
-  $('script[type="application/ld+json"]').each((_, e) => {
-    if (ld) return;
-    try {
-      const obj = JSON.parse($(e).html());
-      const items = Array.isArray(obj) ? obj : [obj];
-      ld = items.find(x => String(x?.['@type']).includes('JobPosting')) || null;
-    } catch { /* no parseable structured metadata */ }
-  });
+  const ld = structuredJobs(html)[0];
+  if (!ld && !$('h1.jobsearch-JobInfoHeader-title, #jobDescriptionText').length) throw new Error('Indeed: unrecognized job detail HTML.');
+  fallback = mergeKnown(fallback, structuredFields(ld));
   const title = clean($('h1.jobsearch-JobInfoHeader-title, h1').first().text()) || ld?.title || fallback.title || null;
   const company = clean($('[data-testid="inlineHeader-companyName"], .jobsearch-InlineCompanyRating').first().text()) || ld?.hiringOrganization?.name || fallback.company || null;
   const description = clean($('#jobDescriptionText').text()) || clean(ld?.description?.replace?.(/<[^>]+>/g,' ')) || fallback.description || null;
   const date = parseDate(ld?.datePosted);
-  return {...fallback, source:'Indeed', title, company, description, postedAt:date.postedAt || fallback.postedAt || null,
-    datePrecision:date.datePrecision || fallback.datePrecision || null, detailsFetched:true, fetchedAt:new Date().toISOString()};
+  return normalizeJob({...fallback, source:'Indeed', title, company, description, postedAt:date.postedAt || fallback.postedAt || null,
+    datePrecision:date.datePrecision || fallback.datePrecision || null, detailsFetched:true, fetchedAt:new Date().toISOString()});
 }
 
-/** Fetches public search-card pages; strictly excludes unknown unsupported facets. */
-export async function findIndeedJobs(options, http) {
-  const results = new Map(), seen = new Set();
-  const stats = {pages:0, cardsSeen:0, detailRequests:0, rejected:0, unknownExcluded:0, facetReliant:new Set()};
-  const evaluation = {...options, provider:'Indeed', indeedSupportedFacets:indeedFacets(options)};
-  const needsDetails = options.details || options.strict;
-  for (let page = 0; page < options.pages && results.size < options.limit; page++) {
-    const html = await http.get(makeIndeedUrl(options, page * 10));
-    const cards = parseIndeedCards(html);
-    stats.pages++;
-    if (!cards.length) break;
-    let newlySeen = 0;
-    for (const card of cards) {
-      if (seen.has(card.id)) continue;
-      newlySeen++;
-      seen.add(card.id);
-      stats.cardsSeen++;
-      if (options.company && normalizeCompany(card.company) !== normalizeCompany(options.company)) {stats.rejected++; continue;}
-      let job = card;
-      // If facets aren't publicly observable, fetching the posting may expose employment/workplace/date.
-      if (needsDetails) {
-        const detail = await http.get(card.url);
-        job = parseIndeedDetail(detail, card);
-        stats.detailRequests++;
-      }
-      const decision = evaluateJob(job, evaluation);
-      if (!decision.match) {
-        stats.rejected++;
-        if (decision.unknowns.length || decision.facetReliant.length) stats.unknownExcluded++;
-        continue;
-      }
-      job.filterEvidence = decision.facetReliant.length ? 'indeed-facet-unconfirmed' : 'observed-or-unfiltered';
-      job.unconfirmedFilters = decision.facetReliant;
-      for (const f of decision.facetReliant) stats.facetReliant.add(`Indeed:${f}`);
-      results.set(job.id, job);
-      if (results.size >= options.limit) break;
-    }
-    if (newlySeen === 0) break;
-  }
-  return {jobs:[...results.values()], stats:{...stats, facetReliant:[...stats.facetReliant]}};
-}
+export const indeedProvider = {
+  name:'Indeed', searchUrl:makeIndeedUrl, parseCards:parseIndeedCards,
+  parseDetail:parseIndeedDetail, jobId:indeedJobId,
+  detailUrl:id => `https://www.indeed.com/viewjob?jk=${encodeURIComponent(id)}`,
+  facets:indeedFacets, pageSize:10,
+  emptyPattern:/jobs-search-results-list|mosaic-provider-jobcards|no (?:matching )?jobs found|did not match any jobs/i
+};
+export function findIndeedJobs(options, http) {return searchProvider(indeedProvider, options, http);}

@@ -15,7 +15,8 @@ export function normalizeWebsites(values) {
   if (!tokens.length || tokens.every(v => !v.trim())) return ['LinkedIn', 'Indeed'];
   const out = [];
   for (const token of tokens) {
-    const name = WEBSITES[token.trim().toLowerCase()];
+    const key = token.trim().toLowerCase();
+    const name = Object.hasOwn(WEBSITES, key) ? WEBSITES[key] : null;
     if (!name) throw new Error(`Unknown --website '${token}'. Choose LinkedIn and/or Indeed.`);
     if (!out.includes(name)) out.push(name);
   }
@@ -44,7 +45,7 @@ export function parseDuration(value) {
 export function normalizeChoice(value, choices, flag) {
   if (value == null) return null;
   const v = String(value).trim().toLowerCase().replaceAll('_', '-').replaceAll(' ', '-');
-  if (!(v in choices)) throw new Error(`Invalid ${flag}: '${value}'. Choose: ${Object.keys(choices).join(', ')}`);
+  if (!Object.hasOwn(choices, v)) throw new Error(`Invalid ${flag}: '${value}'. Choose: ${Object.keys(choices).join(', ')}`);
   return v;
 }
 export function integerBetween(value, min, max, name) {
@@ -112,13 +113,17 @@ export function evaluateJob(job, o, now = Date.now()) {
   const unknowns = [];
   const facetReliant = [];
   if (o.company && normalizeCompany(job.company) !== normalizeCompany(o.company)) failures.push('company');
+  const provider = o.provider || job.source || 'LinkedIn';
+  const supported = o.supportedFacets ?? (provider === 'LinkedIn' ? ['date','workplace','remote','experience','employment','under','verified'] : o.indeedSupportedFacets || []);
+  const hasFacet = key => supported.includes(key);
   if (o.dateSeconds) {
     if (job.postedAt && job.datePrecision === 'instant') {
       const t = Date.parse(job.postedAt);
-      if (!Number.isNaN(t) && now - t > o.dateSeconds * 1000) failures.push('date');
+      if (!Number.isFinite(t)) unknowns.push('date');
+      else if (t > now || now - t > o.dateSeconds * 1000) failures.push('date');
     } else {
       // A day-only date cannot establish a precise 24-hour window.
-      (o.provider === 'Indeed' && !(o.indeedSupportedFacets || []).includes('date') ? unknowns : facetReliant).push('date');
+      (hasFacet('date') ? facetReliant : unknowns).push('date');
     }
   }
   const validateFacet = (name, expected, actual, trueHasFacet) => {
@@ -128,9 +133,8 @@ export function evaluateJob(job, o, now = Date.now()) {
       else unknowns.push(name);
     } else if (actual !== expected) failures.push(name);
   };
-  validateFacet('under', o.under, job.underTenApplicants, o.under === true && o.provider !== 'Indeed');
-  validateFacet('verified', o.verified, job.verified, o.verified === true && o.provider !== 'Indeed');
-  const hasFacet = (key) => o.provider !== 'Indeed' || (o.indeedSupportedFacets || []).includes(key);
+  validateFacet('under', o.under, job.underTenApplicants, o.under === true && hasFacet('under'));
+  validateFacet('verified', o.verified, job.verified, o.verified === true && hasFacet('verified'));
   const markUnknown = (key) => (hasFacet(key) ? facetReliant : unknowns).push(key);
   const wantedWorkplace = o.workplace || (o.remote === true ? 'remote' : null);
   if (wantedWorkplace) {
@@ -182,4 +186,11 @@ export function knownEmployment(input) {
   if (/temporary/.test(s)) return 'T';
   if (/volunteer/.test(s)) return 'V';
   return null;
+}
+
+export function validateOutputOptions(input) {
+  if (input.format && !['table','json','jsonl','csv'].includes(input.format)) throw new Error('--format must be table, json, csv or jsonl.');
+  if (input.delay !== undefined) integerBetween(input.delay,750,30000,'--delay');
+  if (input.limit !== undefined) integerBetween(input.limit,1,200,'--limit');
+  return input;
 }

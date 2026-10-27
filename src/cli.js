@@ -1,5 +1,5 @@
 import {Command} from 'commander';
-import {normalizeOptions, makeSearchUrl, normalizeCompany} from './filters.js';
+import {normalizeOptions, makeSearchUrl, normalizeCompany, validateOutputOptions} from './filters.js';
 import {createHttpClient} from './http.js';
 import {findJobs, fetchJob} from './search.js';
 import {makeIndeedUrl, indeedJobId, parseIndeedDetail} from './indeed.js';
@@ -84,7 +84,8 @@ export async function runCli(argv = process.argv) {
     .option('--delay <ms>', 'Minimum request delay (ms)', '1200')
     .option('--save', 'Save job to local store'))
     .action(async (input, options) => {
-      const site = options.website ? options.website.trim().toLowerCase() : /indeed\.com/i.test(input) ? 'indeed' : 'linkedin';
+      validateOutputOptions(options);
+      const site = options.website ? options.website.trim().toLowerCase() : /^https:\/\/(?:[^/]+\.)?indeed\.com\//i.test(input) ? 'indeed' : 'linkedin';
       if (!['linkedin', 'indeed'].includes(site)) throw new Error('--website must be LinkedIn or Indeed.');
       let job;
       if (site === 'indeed') {
@@ -106,6 +107,7 @@ export async function runCli(argv = process.argv) {
     .option('--company <name>', 'Restrict to company')
     .option('--limit <number>', 'Maximum output rows'))
     .action(async options => {
+      validateOutputOptions(options);
       const jobs = filterSaved(await savedJobs(), options);
       await emit(serializeJobs(jobs, options.format), options.output);
     });
@@ -139,13 +141,12 @@ export async function runCli(argv = process.argv) {
   program.command('doctor')
     .description('Display Node runtime and store info; optional one-request guest endpoint test')
     .option('--probe', 'Perform a single public guest search request')
-    .option('--website <sites...>', 'LinkedIn Indeed (one or more; default: both)', (values, prev) => [...prev, ...values], [])
     .option('--search <keywords>', 'Keywords for --probe', 'chef')
     .option('--website <site>', 'Website to probe: LinkedIn | Indeed', 'LinkedIn')
     .action(async options => {
       const info = {node:process.version, database:defaultDbPath(), saved:(await savedJobs()).length, onlineProbe: 'skipped'};
       if (options.probe) {
-        const opt = normalizeOptions({search:options.search, website:[options.website], limit:1, pages:1});
+        const opt = normalizeOptions({search:options.search, website:options.website, limit:1, pages:1});
         const rawHtml = await createClient({}).get(opt.websites[0] === 'Indeed' ? makeIndeedUrl(opt) : makeSearchUrl(opt));
         info.onlineProbe = rawHtml ? 'HTTP OK; HTML returned (not necessarily job cards)' : 'empty response';
       }

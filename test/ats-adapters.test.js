@@ -43,4 +43,12 @@ test('malformed payloads, unsafe identifiers and unsafe links are rejected', asy
   for (const provider of [greenhouseProvider,leverProvider,ashbyProvider]) await assert.rejects(provider.fetchBoard(board,{json:async () => ({bad:true})}));
   for (const id of ['../evil','a/b','%2f','localhost?x=y','assets']) assert.throws(() => greenhouseUrl({id}));
   assert.equal(normalizeGreenhouse({...gh,absolute_url:'javascript:alert(1)'},board),null);
+  assert.equal(normalizeGreenhouse({...gh,title:{unexpected:true}},board),null);
+});
+
+test('Lever keeps completed pages when a later API request fails', async () => {
+  let calls = 0;
+  const rows = Array.from({length:100},(_,id) => ({...lever,id:String(id)}));
+  const result = await leverProvider.fetchBoard(board,{json:async () => {if (calls++) throw Object.assign(new Error('HTTP 429'),{status:429});return rows;}},{pages:3});
+  assert.equal(result.jobs.length,100);assert.equal(result.complete,false);assert.equal(result.errorStatus,429);assert.match(result.reason,/pagination failed/);
 });

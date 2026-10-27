@@ -1,5 +1,8 @@
 # Engineering summary
 
+This is the earlier HTML-provider audit record. For the current six-provider ATS
+pipeline, see [ATS_VALIDATION.md](ATS_VALIDATION.md).
+
 Completed 2026-10-27. Work followed six sequential phases with a Git commit per
 phase. No external API credentials, paid services, proxies, required accounts or
 browser automation were introduced.

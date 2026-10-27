@@ -1,5 +1,4 @@
-import {clean} from '../schema.js';
-import {assertBoard, posting, publicLink, instant, decodeDescription} from './shared.js';
+import {text as clean,assertBoard, posting, publicLink, instant, decodeDescription} from './shared.js';
 import {normalizeWorkplace} from '../filters.js';
 
 export function ashbyUrl(board,{compensation = true} = {}) {

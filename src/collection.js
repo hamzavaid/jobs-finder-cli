@@ -23,7 +23,7 @@ export class CollectionManager {
     const fingerprint = inventoryFingerprint(inventory), key = searchCacheKey(options,provider.name);
     const exact = await this.cache.read('search',key);
     if (!options.dateSeconds && exact && this.cache.fresh(exact) && exact.data.inventoryFingerprint === fingerprint) {
-      const valid = await mapConcurrent(exact.data.refs,16,async ref => {
+      const valid = await mapConcurrent(exact.data.refs,2,async ref => {
         const cached = await this.cache.read('postings',ref.key);
         return this.cache.fresh(cached) && cached.data.revision === ref.revision;
       },{signal:this.signal});
@@ -43,7 +43,7 @@ export class CollectionManager {
       this.signal?.throwIfAborted();
       let record = cached,dirty = false;
       const contentNeeded = provider.name === 'Greenhouse' && options.details;
-      const fresh = this.cache.fresh(cached) && (!contentNeeded || cached.data.content);
+      const fresh = this.cache.fresh(cached) && (!contentNeeded || cached.data.content) && (cached.data.complete || (cached.data.pages || 0) >= options.pages);
       if (fresh) stats.cacheHits++;
       else if (providerBlocked || refreshes >= this.maxBoards || (board.retryAt && Date.parse(board.retryAt) > this.now())) {
         if (!cached || !this.cache.usableStale(cached)) return;
@@ -53,9 +53,11 @@ export class CollectionManager {
         try {
           if (options.company && provider.fetchCompany && !board.company) board.company = await provider.fetchCompany(board,this.http);
           const outcome = await provider.fetchBoard(board,this.http,{pages:options.pages,content:contentNeeded});
+          const boardRetryAt = outcome.errorStatus ? outcome.retryAt || new Date(this.now() + 15 * 60000).toISOString() : null;
+          if ([401,403,429].includes(outcome.errorStatus)) {providerBlocked = true;inventory.providerRetryAt = boardRetryAt;}
           stats.pages += outcome.pages;
           const fetchedAt = new Date(this.now()).toISOString();
-          const updated = {provider:provider.name,board,jobs:outcome.jobs.map(job => ({...job,lastObservedAt:fetchedAt})),lastSuccessfulFetchAt:outcome.complete ? fetchedAt : cached?.data.lastSuccessfulFetchAt || cached?.updatedAt || fetchedAt,complete:outcome.complete,content:contentNeeded,
+          const updated = {provider:provider.name,board,jobs:outcome.jobs.map(job => ({...job,lastObservedAt:fetchedAt})),lastSuccessfulFetchAt:outcome.complete ? fetchedAt : cached?.data.lastSuccessfulFetchAt || cached?.updatedAt || fetchedAt,complete:outcome.complete,pages:outcome.pages,content:contentNeeded,
             revision:stableKey(outcome.jobs.map(({fetchedAt,...job}) => job))};
           // A truncated fetch never replaces a complete board inventory.
           if (!outcome.complete && cached) {
@@ -64,7 +66,7 @@ export class CollectionManager {
             updated.jobs = [...jobs.values()];updated.revision = stableKey(updated.jobs);
           }
           record = {data:updated,updatedAt:new Date(this.now()).toISOString(),expiresAt:new Date(this.now() + CACHE_TTL.postings).toISOString()};dirty = true;
-          changes.push({...board,status:'valid',lastJobFetchAt:new Date(this.now()).toISOString(),lastValidatedAt:new Date(this.now()).toISOString(),validationAttemptAt:new Date(this.now()).toISOString(),retryAt:null});
+          changes.push({...board,status:'valid',lastJobFetchAt:new Date(this.now()).toISOString(),lastValidatedAt:new Date(this.now()).toISOString(),validationAttemptAt:new Date(this.now()).toISOString(),retryAt:boardRetryAt});
           if (!outcome.complete) stats.errors.push(`${provider.name}: ${board.id}: partial board (${outcome.reason || 'pagination incomplete'}).`);
         } catch (error) {
           if (error.name === 'AbortError') throw error;
@@ -82,6 +84,7 @@ export class CollectionManager {
       if (!record.data.complete) stats.partialBoards++;
       const enriched = [];
       for (let job of record.data.jobs) {
+        if (stats.cardsSeen && stats.cardsSeen % 512 === 0) {await new Promise(resolve => setImmediate(resolve));this.signal?.throwIfAborted();}
         stats.cardsSeen++;
         if (job.lastObservedAt && this.now() - Date.parse(job.lastObservedAt) > CACHE_TTL.stale) continue;
         if (provider.name === 'Greenhouse' && (options.dateSeconds || options.strict) && engine.keywords(job)) {
@@ -122,7 +125,8 @@ export class CollectionManager {
     const jobs = engine.sort([...results.values()]).slice(0,options.limit);
     if (!stats.staleBoards && !options.dateSeconds) {
       const changed = new Map(changes.map(board => [boardKey(board),board]));
-      try {await this.cache.put('search',key,{jobs,stats,refs,inventoryFingerprint:inventoryFingerprint({...inventory,boards:inventory.boards.map(board => changed.get(boardKey(board)) || board)})},{ttl:CACHE_TTL.search});}
+      const ttl = Math.max(0,Math.min(CACHE_TTL.search,...jobs.map(job => (Date.parse(job.cacheFetchedAt) || this.now()) + (job.cacheStatus === 'stale' ? CACHE_TTL.stale : CACHE_TTL.postings) - this.now())));
+      try {await this.cache.put('search',key,{jobs,stats,refs,inventoryFingerprint:inventoryFingerprint({...inventory,boards:inventory.boards.map(board => changed.get(boardKey(board)) || board)})},{ttl});}
       catch (error) {if (error.name === 'AbortError') throw error;stats.errors.push(`${provider.name}: search cache write failed: ${error.message}`);}
     }
     stats.complete = stats.complete && !stats.errors.length;

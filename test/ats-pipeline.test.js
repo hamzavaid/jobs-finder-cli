@@ -82,3 +82,11 @@ test('bounded partial searches also get exact-cache hits without concealing part
   const second = await manager.find(greenhouseProvider,options);
   assert.equal(second.stats.exactCacheHit,true);assert.equal(second.stats.complete,false);assert.equal(http.calls.length,count);
 }));
+
+test('increasing a page budget refreshes a truncated cached board', async () => temporary(async root => {
+  const cache = new CacheManager({root}),http = fixtureApi(),manager = new CollectionManager({cache,http});
+  const options = normalizeOptions({search:'chef',website:'Lever',pages:1});
+  const provider = {...leverProvider,fetchBoard:async (board,client,settings) => ({jobs:(await leverProvider.fetchBoard(board,client,settings)).jobs,complete:settings.pages > 1,pages:settings.pages,reason:'page cap'})};
+  await manager.find(provider,options);const calls = http.calls.length;
+  await manager.find(provider,{...options,pages:2});assert.ok(http.calls.length > calls);
+}));

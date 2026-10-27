@@ -26,7 +26,8 @@ export function validCacheRecord(record,kind,key) {
   if (!record || record.version !== 1 || record.kind !== kind || record.key !== key || !Number.isFinite(Date.parse(record.updatedAt)) || (record.expiresAt !== null && !Number.isFinite(Date.parse(record.expiresAt)))) return false;
   const data = record.data;
   if (!data || typeof data !== 'object') return false;
-  if (kind === 'inventory') return typeof data.provider === 'string' && data.cursors && typeof data.cursors === 'object' && Array.isArray(data.boards) && data.boards.length <= 50000 && data.boards.every(board => board && validBoardId(board.id) && ['global','eu'].includes(board.region || 'global') && ['pending','valid','invalid'].includes(board.status));
+  if (kind !== 'inventory' && record.expiresAt === null) return false;
+  if (kind === 'inventory') return typeof data.provider === 'string' && data.cursors && typeof data.cursors === 'object' && !Array.isArray(data.cursors) && Array.isArray(data.boards) && data.boards.length <= 50000 && data.boards.every(board => board && validBoardId(board.id) && ['global','eu'].includes(board.region || 'global') && ['pending','valid','invalid'].includes(board.status));
   if (kind === 'postings') return validJobs(data.jobs) && typeof data.complete === 'boolean' && typeof data.revision === 'string' && validBoardId(data.board?.id);
   return validJobs(data.jobs) && Array.isArray(data.refs) && data.refs.every(ref => ref && typeof ref.key === 'string' && typeof ref.revision === 'string') && typeof data.inventoryFingerprint === 'string' && data.stats && Array.isArray(data.stats.errors);
 }
@@ -54,6 +55,7 @@ export class CacheManager {
   async read(kind,key) {
     try {return await this.rawRead(kind,key);}
     catch (error) {
+      if (['EACCES','EPERM','ENOTDIR'].includes(error.code)) {this.onWarning('Cache is unavailable; collecting without persisted cache data.');return null;}
       if (error.code && !['ENOENT'].includes(error.code)) throw error;
       return this.withLock(kind,key,async () => {
         try {return await this.rawRead(kind,key);}
@@ -91,8 +93,19 @@ export class CacheManager {
     if (!info || this.now() - info.mtimeMs <= 300000) return;
     // Only one process may inspect/remove a dead owner's lock at a time.
     let guard;
-    try {guard = await open(lockPath + '.recovery','wx',0o600);}
-    catch (error) {if (error.code === 'EEXIST') return; throw error;}
+    try {guard = await open(lockPath + '.recovery','wx',0o600);await guard.writeFile(JSON.stringify({pid:process.pid}));}
+    catch (error) {
+      if (guard) {await guard.close();await rm(lockPath + '.recovery',{force:true});throw error;}
+      if (error.code !== 'EEXIST') throw error;
+      const stale = await stat(lockPath + '.recovery').catch(() => null);
+      if (stale && this.now() - stale.mtimeMs > 300000) {
+        let alive = true;
+        try {const owner = JSON.parse(await readFile(lockPath + '.recovery','utf8'));process.kill(owner.pid,0);}
+        catch (failure) {if (failure.code === 'ESRCH' || failure instanceof SyntaxError) alive = false;}
+        if (!alive) await rm(lockPath + '.recovery',{force:true});
+      }
+      return;
+    }
     try {
       const current = await stat(lockPath).catch(() => null);
       if (!current || this.now() - current.mtimeMs <= 300000) return;
@@ -115,11 +128,13 @@ export class CacheManager {
       const stamp = this.now(), data = await mutate(current?.data);
       const record = {version:1,kind,key,updatedAt:new Date(stamp).toISOString(),expiresAt:ttl === null ? null : new Date(stamp + ttl).toISOString(),data};
       if (!validCacheRecord(record,kind,key)) throw new Error(`Refusing to write invalid ${kind} cache.`);
+      const encoded = JSON.stringify(record);
+      if (Buffer.byteLength(encoded) > 64 * 1024 * 1024) throw new Error('Cache record exceeds the safe file size limit.');
       const temporary = this.path(kind,key) + `.tmp-${randomUUID()}`;
       try {
         // Once replacement begins it finishes even if cancellation arrives; readers
         // observe the old record or the new complete record, never a partial write.
-        await writeFile(temporary,JSON.stringify(record),{encoding:'utf8',flag:'wx',mode:0o600});
+        await writeFile(temporary,encoded,{encoding:'utf8',flag:'wx',mode:0o600});
         await rename(temporary,this.path(kind,key));
       } finally {await rm(temporary,{force:true});}
       return record;

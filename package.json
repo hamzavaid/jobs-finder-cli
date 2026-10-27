@@ -2,7 +2,7 @@
   "name": "jobs-finder-cli",
   "version": "2.0.0",
   "private": true,
-  "description": "Occupation-neutral public job search CLI for LinkedIn, Indeed and Glassdoor",
+  "description": "Occupation-neutral job search with automatic public ATS discovery and caching",
   "type": "module",
   "bin": {
     "jobs": "./bin/jobs.js"

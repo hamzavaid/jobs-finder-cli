@@ -1,5 +1,4 @@
-import {clean} from '../schema.js';
-import {assertBoard, posting, publicLink, instant, decodeDescription, observedWorkplace} from './shared.js';
+import {text as clean,assertBoard, posting, publicLink, instant, decodeDescription, observedWorkplace} from './shared.js';
 
 export function greenhouseUrl(board, {content = false, jobId} = {}) {
   const token = assertBoard(board);

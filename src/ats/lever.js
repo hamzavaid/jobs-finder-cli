@@ -1,5 +1,4 @@
-import {clean} from '../schema.js';
-import {assertBoard, posting, publicLink, decodeDescription, observedWorkplace} from './shared.js';
+import {text as clean,assertBoard, posting, publicLink, decodeDescription, observedWorkplace} from './shared.js';
 
 export function leverUrl(board, {skip = 0, limit = 100, jobId} = {}) {
   const token = assertBoard(board);
@@ -29,7 +28,12 @@ export const leverProvider = {
   async fetchBoard(board,http,{pages = 5} = {}) {
     const jobs = new Map();
     for (let page = 0; page < pages; page++) {
-      const data = await http.json(leverUrl(board,{skip:page * 100}));
+      let data;
+      try {data = await http.json(leverUrl(board,{skip:page * 100}));}
+      catch (error) {
+        if (error.name === 'AbortError' || !jobs.size) throw error;
+        return {jobs:[...jobs.values()],complete:false,pages:page,reason:`pagination failed: ${error.message}`,errorStatus:error.status,retryAt:error.retryAt};
+      }
       if (!Array.isArray(data)) throw new Error('Lever returned an invalid postings array.');
       let fresh = 0;
       for (const raw of data) {

@@ -7,6 +7,8 @@ import {assertSearchPage} from './provider-search.js';
 import {serializeJobs, emit} from './output.js';
 import {savedJobs, saveJobs, statsForSaved, defaultDbPath} from './store.js';
 import {ProgressReporter} from './progress.js';
+import {CollectionManager} from './collection.js';
+import {createApiClient} from './api-http.js';
 
 function addFilters(command) {
   return command
@@ -49,7 +51,7 @@ export async function runCli(argv = process.argv) {
     .showHelpAfterError('(run jobs --help for commands)');
 
   addOutputOptions(addFilters(program.command('find')
-    .description('Find jobs on LinkedIn, Indeed and/or Glassdoor with source-aware filtering')
+    .description('Find jobs across selected websites and public ATS APIs')
     .option('--limit <number>', 'Maximum accepted jobs, 1–200', '25')
     .option('--pages <number>', 'Maximum guest-search pages to scan, 1–20', '5')
     .option('--delay <ms>', 'Minimum delay between requests (750–30000 ms)', '1200')
@@ -148,7 +150,7 @@ export async function runCli(argv = process.argv) {
 
   program.command('doctor')
     .description('Display runtime/store info; optionally probe selected public search pages')
-    .option('--probe', 'Request one search page per selected provider (plus Glassdoor robots.txt)')
+    .option('--probe', 'Probe public pages/APIs; ATS board discovery is automatic and bounded')
     .option('--search <keywords>', 'Keywords for --probe', 'chef')
     .option('--website <sites...>', 'LinkedIn Indeed Glassdoor Greenhouse Lever Ashby; default: all six', (values, prev) => [...prev, ...(Array.isArray(values) ? values : [values])], [])
     .action(async options => {
@@ -162,8 +164,9 @@ export async function runCli(argv = process.argv) {
           const provider = providers[site];
           try {
             if (provider.kind === 'ats') {
-              const {jobs,stats} = await findJobs({...opt,websites:[site]},createClient({}));
-              info.onlineProbe[site] = {status:'ok',jobs:jobs.length,boards:stats.providers[site].boardsVisited};
+              const manager = new CollectionManager({http:createApiClient({retries:0}),maxBoards:1,discoveryOptions:{maxPages:1,maxValidations:1}});
+              const {jobs,stats} = await manager.find(provider,{...opt,websites:[site]});
+              info.onlineProbe[site] = {status:stats.complete ? 'ok' : 'partial',jobs:jobs.length,boards:stats.boardsVisited,warnings:stats.errors.slice(0,3)};
               continue;
             }
             const client = provider.prepareHttp ? await provider.prepareHttp(http) : http;

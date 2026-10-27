@@ -53,3 +53,14 @@ test('obsolete search records are pruned but discovery inventories survive', asy
   await cache.prune();
   assert.ok(await cache.read('inventory','Lever')); assert.equal(await cache.read('search','query'),null);
 }));
+
+test('cache automatically recovers old dead-owner locks and interrupted recovery guards', async () => temporary(async root => {
+  const cache = new CacheManager({root});await cache.put('inventory','Lever',inventory());
+  const lock = cache.path('inventory','Lever') + '.lock';
+  for (const path of [lock,lock + '.recovery']) {
+    await writeFile(path,'{interrupted');const old = new Date(Date.now() - 600000);await utimes(path,old,old);
+  }
+  await cache.put('inventory','Lever',{...inventory(),recovered:true});
+  assert.equal((await cache.read('inventory','Lever')).data.recovered,true);
+  assert.ok(!(await readdir(join(root,'inventory'))).some(name => name.includes('.lock')));
+}));

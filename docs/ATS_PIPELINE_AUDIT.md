@@ -65,3 +65,18 @@ it does not execute Python or adopt the reference project's curated seed list.
 8. Hardened stale fallback, partial page unions, provider-level persisted backoff, exact-cache invalidation, automatic pruning and optional cache-write failures. Cross-source duplicate hints retain distinct records. Added recovery regressions; cancellation listeners are cleaned up. Live archive smoke: Wayback timed out/503; Common Crawl timed out, so end-to-end live cold discovery is unverified in this environment.
 
 9. Expanded deterministic QA to 113 tests and retained Node 20/22/24 Windows/Ubuntu CI. Added real CLI cold/warm subprocess tests, API transport, discovery fallbacks, cache recovery, progress, filtering and failure-isolation regressions. Optional live smoke remains separate. Live adapters normalized Greenhouse 18, Lever 10 and Ashby 66 postings on example boards; a Greenhouse detail exposed its publication date. Automatic discovery returned matches from all three providers with explicit partial coverage. The actual find CLI returned five Software Engineer matches after scanning 3,898 cards. A measured repeat over automatically discovered data took 113 ms with zero HTTP calls; its preceding bounded run took 3,943 ms and three HTTP calls. No company registry or new runtime dependencies were added.
+
+10. Completed user-focused README, architecture/cache/discovery documentation and
+engineering validation summary. A separate final review corrected later-page Lever
+failure retention, larger page-cap cache refresh, non-string title handling,
+Greenhouse detail reuse, shard memory limits, freshness-boundary exact-cache TTL,
+queued Retry-After handling, stale recovery guards and optional cache-I/O behavior.
+Regression tests were added for the confirmed issues.
+
+Final suite: **117 passed, zero failed/skipped** on Node 20/22/24/25 on Windows.
+Clean installation, recursive syntax lint, dependency audit (zero known advisories),
+workflow YAML/pinned-action checks, complete CLI flag documentation/link checks,
+and Git whitespace validation pass. Runtime dependencies remain the original three.
+GitHub-hosted Ubuntu/Windows CI is configured but was not executed here. Live index
+outages, partial coverage, unsupported attributes, per-process network limits and
+other remaining limits are disclosed in [ATS_VALIDATION.md](ATS_VALIDATION.md).

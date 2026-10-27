@@ -2,6 +2,7 @@ import {normalizeJob, clean, plainText} from '../schema.js';
 import {normalizeWorkplace} from '../filters.js';
 
 const reserved = new Set(['api','static','assets','_next','css','js','images','img','embed','robots.txt','favicon.ico','sitemap.xml']);
+export const text = value => typeof value === 'string' ? clean(value) : '';
 export function validBoardId(value) {
   return typeof value === 'string' && /^[\p{L}\p{N}][\p{L}\p{N}\p{M} ._&+'()-]{0,99}$/u.test(value) &&
     value === value.trim() && !reserved.has(value.toLowerCase()) && !/^root\./i.test(value) &&
@@ -31,7 +32,7 @@ export function decodeDescription(value) {
 export function posting(source, board, raw, fields) {
   const id = String(raw.id ?? '');
   if (!/^[\w-]{1,128}$/.test(id) || !fields.title || !fields.url) return null;
-  const employer = clean(raw.company_name || raw.companyName || board.company) || null;
+  const employer = text(raw.company_name) || text(raw.companyName) || text(board.company) || null;
   return normalizeJob({source, id:`${boardKey(board)}:${id}`, providerJobId:id,
     boardId:board.id, region:board.region || 'global',
     company:employer || board.id, companyEvidence:employer ? 'observed' : 'board-identifier',

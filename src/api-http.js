@@ -13,7 +13,7 @@ export function assertApiUrl(value) {
     'index.commoncrawl.org':/^\/(?:collinfo\.json|CC-MAIN-\d{4}-\d{2}-index)$/,
     'urlscan.io':/^\/api\/v1\/search\/$/
   };
-  if (url.protocol !== 'https:' || url.port || url.username || url.password || !Object.hasOwn(allowed,url.hostname) || !allowed[url.hostname].test(url.pathname) || /%2f|%5c|%00/i.test(url.pathname)) throw new Error('Refusing an untrusted ATS/index request URL.');
+  if (url.protocol !== 'https:' || url.port || url.username || url.password || !Object.hasOwn(allowed,url.hostname) || !allowed[url.hostname].test(url.pathname) || /%2f|%5c|%00|%25/i.test(url.pathname)) throw new Error('Refusing an untrusted ATS/index request URL.');
   return url;
 }
 export function retryAfterMs(value,now = Date.now()) {
@@ -23,15 +23,28 @@ export function retryAfterMs(value,now = Date.now()) {
 }
 export function createApiClient({retries = 2,random = Math.random,fetchImpl = globalThis.fetch,signal,timeoutMs = 15000,delayMs = 1200,maxBytes = 16 * 1024 * 1024,now = Date.now,sleep = ms => delay(ms,undefined,{signal}),scheduler = new RequestScheduler({signal})} = {}) {
   if (!Number.isInteger(retries) || retries < 0 || retries > 3 || !Number.isFinite(timeoutMs) || timeoutMs <= 0 || !Number.isFinite(delayMs) || delayMs < 0 || !Number.isFinite(maxBytes) || maxBytes < 1) throw new Error('Invalid API HTTP configuration.');
-  const next = new Map(),cooldown = new Map();
+  const next = new Map(),cooldown = new Map(),gates = new Map();
+  async function reserveStart(host) {
+    const start = (gates.get(host) || Promise.resolve()).catch(() => {}).then(async () => {
+      while (true) {
+        signal?.throwIfAborted();
+        const slot = Math.max(now(),next.get(host) || 0,cooldown.get(host) || 0);
+        const wait = slot - now();
+        if (wait > 30000) {const error = new AccessError(`${host}: provider is backed off; retry later.`,429);error.retryAt = new Date(slot).toISOString();throw error;}
+        if (wait <= 0) break;
+        await sleep(wait);
+        // A response can extend the host's cooldown while another caller waits.
+      }
+      next.set(host,now() + (host === 'urlscan.io' ? Math.max(2100,delayMs) : /archive|commoncrawl/.test(host) ? Math.max(1100,delayMs) : delayMs));
+    });
+    gates.set(host,start);await start;
+  }
   async function attempt(value,{method = 'GET',json = false} = {}) {
+    if (!['GET','HEAD'].includes(method)) throw new Error('Public ATS transport permits GET and HEAD only.');
     const url = assertApiUrl(value), host = url.hostname;
     return scheduler.run(host,async () => {
       signal?.throwIfAborted();
-      const slot = Math.max(now(),next.get(host) || 0,cooldown.get(host) || 0);
-      next.set(host,slot + (host === 'urlscan.io' ? Math.max(2100,delayMs) : /archive|commoncrawl/.test(host) ? Math.max(1100,delayMs) : delayMs));
-      if (slot - now() > 30000) {const error = new AccessError(`${host}: provider is backed off; retry later.`,429);error.retryAt = new Date(slot).toISOString();throw error;}
-      if (slot > now()) await sleep(slot - now());
+      await reserveStart(host);
       signal?.throwIfAborted();
       const controller = new AbortController();
       const callerAborted = () => controller.abort(signal.reason);
@@ -46,7 +59,7 @@ export function createApiClient({retries = 2,random = Math.random,fetchImpl = gl
             const error = new AccessError(`${host}: HTTP ${response.status}${response.status === 429 ? ' (rate limited)' : [401,403].includes(response.status) ? ' (access restricted)' : ''}.`,response.status);
             error.retryAfter = retryAfterMs(response.headers?.get?.('retry-after'),now());
             if (response.status === 429 || error.retryAfter) {
-              const until = now() + Math.max(1000,error.retryAfter);
+              const until = Math.min(8.64e15,now() + Math.max(1000,error.retryAfter));
               cooldown.set(host,Math.max(until,cooldown.get(host) || 0));error.retryAt = new Date(until).toISOString();
             }
             throw error;

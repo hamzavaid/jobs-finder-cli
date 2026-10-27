@@ -8,6 +8,7 @@ test('API transport accepts only fixed HTTPS API/index routes and forbids redire
   let init;
   const client = createApiClient({delayMs:0,fetchImpl:async (_,options) => {init = options;return new Response('[]');}});
   assert.deepEqual(await client.json(url),[]);assert.equal(init.redirect,'error');
+  await assert.rejects(client.request(url,{method:'POST'}),/GET and HEAD only/);
 });
 test('API retry backoff honors Retry-After seconds and HTTP dates; 403/404 never retry', async () => {
   let calls = 0,clock = Date.now();const waits = [];
@@ -44,4 +45,14 @@ test('global and per-host concurrency limits hold and cancellation rejects queue
   const pending = Array.from({length:10},() => client.json(url));
   setTimeout(() => controller.abort(),10);
   const results = await Promise.allSettled(pending);assert.ok(results.every(result => result.status === 'rejected' && result.reason.name === 'AbortError'));
+});
+
+test('a newly received Retry-After also delays requests already waiting in the host queue', async () => {
+  const starts = [];
+  const client = createApiClient({delayMs:5,retries:0,fetchImpl:async () => {
+    starts.push(Date.now());return starts.length === 1 ? new Response('',{status:429,headers:{'Retry-After':'0.04'}}) : new Response('[]');
+  }});
+  const outcomes = await Promise.allSettled([client.json(url),client.json(url)]);
+  assert.equal(outcomes[0].status,'rejected');assert.equal(outcomes[1].status,'fulfilled');
+  assert.ok(starts[1] - starts[0] >= 35,'queued request started before the provider cooldown');
 });

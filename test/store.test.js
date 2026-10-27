@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp, rm} from 'node:fs/promises';
+import {mkdtemp, rm, writeFile, readFile, readdir} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {saveJobs, savedJobs, statsForSaved} from '../src/store.js';
@@ -20,4 +20,17 @@ test('locally saved jobs upsert by ID and summarize', async () => {
   } finally {
     await rm(dir, {recursive:true, force:true});
   }
+});
+
+test('cross-process lock contention fails without changing data and reports actual saved count', async () => {
+  const dir = await mkdtemp(join(tmpdir(),'jobs-locked-')), path = join(dir,'db.json');
+  try {
+    const result = await saveJobs([{id:'12345'}, {}, null],path);
+    assert.equal(result.saved,1);
+    const before = await readFile(path,'utf8');
+    await writeFile(path + '.lock','other writer');
+    await assert.rejects(saveJobs([{id:'67890'}],path), /store is locked/);
+    assert.equal(await readFile(path,'utf8'),before);
+    assert.equal((await readdir(dir)).length,2);
+  } finally {await rm(dir,{recursive:true,force:true});}
 });

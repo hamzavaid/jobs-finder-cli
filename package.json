@@ -2,7 +2,7 @@
   "name": "jobs-finder-cli",
   "version": "2.0.0",
   "private": true,
-  "description": "Occupation-neutral job search CLI for LinkedIn and Indeed",
+  "description": "Occupation-neutral public job search CLI for LinkedIn, Indeed and Glassdoor",
   "type": "module",
   "bin": {
     "jobs": "./bin/jobs.js"
@@ -10,7 +10,8 @@
   "scripts": {
     "start": "node ./bin/jobs.js",
     "test": "node --test",
-    "lint": "node --check bin/jobs.js && node --check src/cli.js && node --check src/search.js && node --check src/indeed.js && node --check src/parser.js && node --check src/filters.js"
+    "lint": "node scripts/check-syntax.js",
+    "test:live": "node scripts/live-smoke.js"
   },
   "engines": {
     "node": ">=20"

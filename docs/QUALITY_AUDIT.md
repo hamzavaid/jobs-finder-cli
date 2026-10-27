@@ -68,3 +68,12 @@ Commander variadic collector spread a string into characters (`Glassdoor` became
 Regression tests cover repeated, comma-separated, mixed-case and multiple arguments.
 51/51 tests and existing lint pass. The default-provider assertions were intentionally
 updated from two to three; explicit two-provider behavior remains tested.
+
+Phase 5: clean npm ci succeeds; all 66 offline tests pass on the installed Node
+25 runtime and a separately downloaded Node 20 runtime. Recursive syntax lint covers
+source, CLI, scripts and tests. CI runs installation/lint/tests/CLI smoke commands on
+Node 20/22/24 with Windows and Ubuntu, read-only permissions and immutable official
+action revisions. CI itself has not run on GitHub during this session. Optional live
+smoke script is outside standard test discovery and never runs in CI. Live results:
+LinkedIn parsed three normalized cards from one page; Indeed and Glassdoor each
+returned HTTP 403 and stopped. No working Indeed/Glassdoor extraction claim is made.

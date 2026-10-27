@@ -9,15 +9,15 @@ export const EMPLOYMENT = Object.freeze({
   contract: 'C', temporary: 'T', internship: 'I', intern: 'I',
   volunteer: 'V', other: 'O'
 });
-export const WEBSITES = Object.freeze({linkedin: 'LinkedIn', indeed: 'Indeed'});
+export const WEBSITES = Object.freeze({linkedin: 'LinkedIn', indeed: 'Indeed', glassdoor: 'Glassdoor'});
 export function normalizeWebsites(values) {
   const tokens = (Array.isArray(values) ? values : values == null ? [] : [values]).flatMap(v => String(v).split(','));
-  if (!tokens.length || tokens.every(v => !v.trim())) return ['LinkedIn', 'Indeed'];
+  if (!tokens.length) return ['LinkedIn', 'Indeed', 'Glassdoor'];
   const out = [];
   for (const token of tokens) {
     const key = token.trim().toLowerCase();
     const name = Object.hasOwn(WEBSITES, key) ? WEBSITES[key] : null;
-    if (!name) throw new Error(`Unknown --website '${token}'. Choose LinkedIn and/or Indeed.`);
+    if (!name) throw new Error(`Unknown --website '${token}'. Choose LinkedIn, Indeed or Glassdoor.`);
     if (!out.includes(name)) out.push(name);
   }
   return out;

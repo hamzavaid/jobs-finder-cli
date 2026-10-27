@@ -7,11 +7,11 @@ import {normalizeOptions} from '../src/filters.js';
 import {findJobs} from '../src/search.js';
 import {saveJobs, savedJobs, statsForSaved} from '../src/store.js';
 
-test('website defaults to both; accepts multiple values and mixed case', () => {
-  assert.deepEqual(normalizeOptions({search:'cook'}).websites, ['LinkedIn','Indeed']);
+test('website defaults to three; accepts multiple values and mixed case', () => {
+  assert.deepEqual(normalizeOptions({search:'cook'}).websites, ['LinkedIn','Indeed','Glassdoor']);
   assert.deepEqual(normalizeOptions({search:'cook',website:['indeed','LINKEDIN','Indeed']}).websites, ['Indeed','LinkedIn']);
   assert.deepEqual(normalizeOptions({search:'cook',website:['linkedin,indeed']}).websites, ['LinkedIn','Indeed']);
-  assert.throws(() => normalizeOptions({search:'cook',website:['glassdoor']}), /Unknown --website/);
+  assert.throws(() => normalizeOptions({search:'cook',website:['missing']}), /Unknown --website/);
 });
 test('two-source search merges both providers without mixing IDs', async () => {
   const linkedin = await readFile(new URL('./fixtures/search.html', import.meta.url), 'utf8');

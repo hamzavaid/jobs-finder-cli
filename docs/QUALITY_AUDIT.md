@@ -58,3 +58,13 @@ errors. Six new test groups; 46/46 pass. See GLASSDOOR_RESEARCH.md for primary
 sources and limitations. Live Node request returned HTTP 403; no live extraction
 claim is made. npm registry advisory check succeeded: zero known vulnerabilities;
 installing the free robots-parser dependency also reported zero vulnerabilities.
+
+Phase 4: all three sources now default in find/url; provider registry dispatches
+search/detail, saved/export/stats accept provider filters, doctor probes each selected
+provider independently. Posting URLs validate host/protocol and reject source conflicts.
+Actual CLI subprocess checks exposed an additional high-priority defect (Q15): the
+Commander variadic collector spread a string into characters (`Glassdoor` became
+`G`, `l`, ...). Fixed by treating each parser value as a scalar or array explicitly.
+Regression tests cover repeated, comma-separated, mixed-case and multiple arguments.
+51/51 tests and existing lint pass. The default-provider assertions were intentionally
+updated from two to three; explicit two-provider behavior remains tested.

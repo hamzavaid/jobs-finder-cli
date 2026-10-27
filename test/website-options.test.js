@@ -2,8 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {normalizeOptions, evaluateJob} from '../src/filters.js';
 
-test('default searches both websites', () => {
-  assert.deepEqual(normalizeOptions({search:'sous chef'}).websites, ['LinkedIn','Indeed']);
+test('default searches all three websites', () => {
+  assert.deepEqual(normalizeOptions({search:'sous chef'}).websites, ['LinkedIn','Indeed','Glassdoor']);
 });
 test('supports the exact multi-value website syntax with case-insensitive names', () => {
   assert.deepEqual(normalizeOptions({search:'accountant',website:['LinkedIn','Indeed']}).websites, ['LinkedIn','Indeed']);

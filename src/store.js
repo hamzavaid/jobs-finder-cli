@@ -59,8 +59,9 @@ export function saveJobs(jobs, path = defaultDbPath()) {
 export async function savedJobs(path = defaultDbPath()) {
   return Object.values((await loadDb(path)).jobs).map(j => ({...j, source:j.source || 'LinkedIn'}));
 }
-export async function statsForSaved(path = defaultDbPath()) {
-  const jobs = await savedJobs(path);
+export async function statsForSaved(path = defaultDbPath(), websites = null) {
+  const all = await savedJobs(path);
+  const jobs = websites ? all.filter(job => websites.includes(job.source)) : all;
   const count = key => {
     const counts = new Map();
     for (const job of jobs) {const value = job[key] || 'unknown'; counts.set(value, (counts.get(value) || 0) + 1);}

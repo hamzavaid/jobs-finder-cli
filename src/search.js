@@ -8,14 +8,14 @@ export async function findJobs(options, http) {
   const stats = {pages:0, cardsSeen:0, rejected:0, detailRequests:0, unknownExcluded:0,
     facetReliant:[], errors:[], providers:{}};
   let successfulProviders = 0;
-  for (const site of options.websites ?? ['LinkedIn','Indeed']) {
+  for (const site of options.websites ?? Object.keys(providers)) {
     try {
       const provider = providers[site];
       if (!provider) throw new Error(`Unknown provider: ${site}`);
       const outcome = await searchProvider(provider, options, http);
       stats.errors.push(...(outcome.stats.errors || []));
       successfulProviders++;
-      stats.providers[site] = {pages:outcome.stats.pages, results:outcome.jobs.length};
+      stats.providers[site] = {pages:outcome.stats.pages, results:outcome.jobs.length, partial:!!outcome.stats.errors?.length};
       for (const key of ['pages', 'cardsSeen', 'rejected', 'detailRequests', 'unknownExcluded']) stats[key] += outcome.stats[key];
       stats.facetReliant.push(...outcome.stats.facetReliant.map(f => `${site}:${f}`));
       providerJobs.push({site, jobs:outcome.jobs});

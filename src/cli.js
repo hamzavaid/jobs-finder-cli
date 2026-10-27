@@ -1,15 +1,15 @@
 import {Command} from 'commander';
-import {normalizeOptions, makeSearchUrl, normalizeCompany, validateOutputOptions} from './filters.js';
+import {normalizeOptions, normalizeCompany, validateOutputOptions, normalizeWebsites} from './filters.js';
 import {createHttpClient} from './http.js';
-import {findJobs, fetchJob} from './search.js';
-import {makeIndeedUrl, indeedJobId, parseIndeedDetail} from './indeed.js';
+import {findJobs} from './search.js';
+import {providers, fetchProviderJob} from './providers.js';
+import {assertSearchPage} from './provider-search.js';
 import {serializeJobs, emit} from './output.js';
 import {savedJobs, saveJobs, statsForSaved, defaultDbPath} from './store.js';
-import {canonicalJobId} from './parser.js';
 
 function addFilters(command) {
   return command
-    .option('--website <sites...>', 'LinkedIn Indeed (one or more; default: both)', (values, prev) => [...prev, ...values], [])
+    .option('--website <sites...>', 'LinkedIn Indeed Glassdoor (one or more; default: all three)', (values, prev) => [...prev, ...(Array.isArray(values) ? values : [values])], [])
     .option('--search <keywords>', 'Free-form job keywords (ANY occupation, e.g. chef, accountant)')
     .option('--date <duration>', 'Posted within Nh/Nd/Nw, e.g. 1d = past 24 hours')
     .option('--company <name>', 'Company name (client-side exact-normalized match)')
@@ -17,8 +17,8 @@ function addFilters(command) {
     .option('--workplace <type>', 'remote | hybrid | onsite (instead of --remote)')
     .option('--experience <level>', 'internship | entry | associate | senior | director | executive')
     .option('--employment <type>', 'full-time | part-time | contract | temporary | internship | volunteer | other')
-    .option('--under <boolean>', 'LinkedIn applicants filter; Indeed unsupported without observed count')
-    .option('--verified <boolean>', 'LinkedIn verification filter; Indeed unknown without observed badge')
+    .option('--under <boolean>', 'Under 10 applicants; unknown counts are excluded except unconfirmed LinkedIn true facet')
+    .option('--verified <boolean>', 'Job verification; unknown values require a supported facet or are excluded')
     .option('--location <place>', 'City, region, or country, e.g. "Los Angeles"');
 }
 function addOutputOptions(command) {
@@ -35,6 +35,7 @@ function filterSaved(jobs, options) {
     const q = String(options.search).toLowerCase();
     rows = rows.filter(j => [j.title, j.company, j.description, j.location].some(t => String(t || '').toLowerCase().includes(q)));
   }
+  if (options.website?.length) {const sites = normalizeWebsites(options.website); rows = rows.filter(j => sites.includes(j.source || 'LinkedIn'));}
   if (options.limit) rows = rows.slice(0, Number(options.limit));
   return rows;
 }
@@ -42,12 +43,12 @@ function filterSaved(jobs, options) {
 export async function runCli(argv = process.argv) {
   const program = new Command();
   program.name('jobs')
-    .description('Search job listings on LinkedIn and Indeed across all occupations.')
+    .description('Search job listings on LinkedIn, Indeed and Glassdoor across all occupations.')
     .version('2.0.0')
     .showHelpAfterError('(run jobs --help for commands)');
 
   addOutputOptions(addFilters(program.command('find')
-    .description('Find jobs on LinkedIn and/or Indeed with source-aware filtering')
+    .description('Find jobs on LinkedIn, Indeed and/or Glassdoor with source-aware filtering')
     .option('--limit <number>', 'Maximum accepted jobs, 1–200', '25')
     .option('--pages <number>', 'Maximum guest-search pages to scan, 1–20', '5')
     .option('--delay <ms>', 'Minimum delay between requests (750–30000 ms)', '1200')
@@ -78,24 +79,14 @@ export async function runCli(argv = process.argv) {
     });
 
   addOutputOptions(program.command('job')
-    .description('Retrieve a LinkedIn or Indeed job by ID or posting URL')
-    .argument('<id-or-url>', 'LinkedIn numeric ID/URL or Indeed job key/URL')
-    .option('--website <site>', 'LinkedIn | Indeed; autodetected from URLs')
+    .description('Retrieve a LinkedIn, Indeed or Glassdoor job by ID or posting URL')
+    .argument('<id-or-url>', 'LinkedIn/Glassdoor numeric ID, Indeed key, or posting URL')
+    .option('--website <site>', 'LinkedIn | Indeed | Glassdoor; autodetected from URLs')
     .option('--delay <ms>', 'Minimum request delay (ms)', '1200')
     .option('--save', 'Save job to local store'))
     .action(async (input, options) => {
       validateOutputOptions(options);
-      const site = options.website ? options.website.trim().toLowerCase() : /^https:\/\/(?:[^/]+\.)?indeed\.com\//i.test(input) ? 'indeed' : 'linkedin';
-      if (!['linkedin', 'indeed'].includes(site)) throw new Error('--website must be LinkedIn or Indeed.');
-      let job;
-      if (site === 'indeed') {
-        const id = indeedJobId(input);
-        const url = `https://www.indeed.com/viewjob?jk=${id}`;
-        job = parseIndeedDetail(await createClient(options).get(url), {id, url, source:'Indeed'});
-      } else {
-        canonicalJobId(input);
-        job = await fetchJob(input, createClient(options));
-      }
+      const job = await fetchProviderJob(input, options.website, createClient(options));
       if (!job.title) eprint('WARNING: The guest detail did not expose a job title.');
       if (options.save) await saveJobs([job]);
       await emit(serializeJobs([job], options.format), options.output);
@@ -105,6 +96,7 @@ export async function runCli(argv = process.argv) {
     .description('Show locally saved job results without making any web requests')
     .option('--search <text>', 'Search title/company/description/location')
     .option('--company <name>', 'Restrict to company')
+    .option('--website <sites...>', 'Filter saved sources: LinkedIn Indeed Glassdoor', (values, prev) => [...prev, ...(Array.isArray(values) ? values : [values])], [])
     .option('--limit <number>', 'Maximum output rows'))
     .action(async options => {
       validateOutputOptions(options);
@@ -118,6 +110,7 @@ export async function runCli(argv = process.argv) {
     .option('--format <format>', 'json | jsonl | csv', 'csv')
     .option('--search <text>', 'Search title/company/description/location')
     .option('--company <name>', 'Restrict to company')
+    .option('--website <sites...>', 'Filter saved sources: LinkedIn Indeed Glassdoor', (values, prev) => [...prev, ...(Array.isArray(values) ? values : [values])], [])
     .action(async options => {
       if (!['json', 'jsonl', 'csv'].includes(options.format)) throw new Error('Export format must be json, jsonl, or csv.');
       const jobs = filterSaved(await savedJobs(), options);
@@ -125,32 +118,47 @@ export async function runCli(argv = process.argv) {
       eprint(`Exported ${jobs.length} saved job(s) to ${options.output}`);
     });
 
-  program.command('stats').description('Summarize locally saved job counts (no network)').action(async () => {
-    const stats = await statsForSaved();
+  program.command('stats').description('Summarize locally saved job counts (no network)')
+    .option('--website <sites...>', 'Filter saved sources', (values, prev) => [...prev, ...(Array.isArray(values) ? values : [values])], [])
+    .action(async options => {
+    const stats = await statsForSaved(undefined, options.website.length ? normalizeWebsites(options.website) : null);
     process.stdout.write(JSON.stringify(stats, null, 2) + '\n');
   });
 
   addFilters(program.command('url')
-    .description('Print LinkedIn and/or Indeed search URLs (no web request)'))
+    .description('Print LinkedIn, Indeed and/or Glassdoor search URLs (no web request)'))
     .action(raw => {
       const opts = normalizeOptions({...raw, limit: 1, pages: 1});
-      if (opts.websites.includes('LinkedIn')) process.stdout.write(makeSearchUrl(opts, 0) + '\n');
-      if (opts.websites.includes('Indeed')) process.stdout.write(makeIndeedUrl(opts, 0) + '\n');
+      for (const site of opts.websites) process.stdout.write(providers[site].searchUrl(opts, 0) + '\n');
     });
 
   program.command('doctor')
-    .description('Display Node runtime and store info; optional one-request guest endpoint test')
-    .option('--probe', 'Perform a single public guest search request')
+    .description('Display runtime/store info; optionally probe selected public search pages')
+    .option('--probe', 'Request one search page per selected provider (plus Glassdoor robots.txt)')
     .option('--search <keywords>', 'Keywords for --probe', 'chef')
-    .option('--website <site>', 'Website to probe: LinkedIn | Indeed', 'LinkedIn')
+    .option('--website <sites...>', 'LinkedIn Indeed Glassdoor; default: all three', (values, prev) => [...prev, ...(Array.isArray(values) ? values : [values])], [])
     .action(async options => {
-      const info = {node:process.version, database:defaultDbPath(), saved:(await savedJobs()).length, onlineProbe: 'skipped'};
+      const sites = normalizeWebsites(options.website);
+      const info = {node:process.version, database:defaultDbPath(), saved:(await savedJobs()).length, websites:sites, onlineProbe:'skipped'};
       if (options.probe) {
-        const opt = normalizeOptions({search:options.search, website:options.website, limit:1, pages:1});
-        const rawHtml = await createClient({}).get(opt.websites[0] === 'Indeed' ? makeIndeedUrl(opt) : makeSearchUrl(opt));
-        info.onlineProbe = rawHtml ? 'HTTP OK; HTML returned (not necessarily job cards)' : 'empty response';
+        const opt = normalizeOptions({search:options.search,website:sites,limit:1,pages:1});
+        const http = createHttpClient({retries:0});
+        info.onlineProbe = {};
+        for (const site of sites) {
+          const provider = providers[site];
+          try {
+            const client = provider.prepareHttp ? await provider.prepareHttp(http) : http;
+            const html = await client.get(provider.searchUrl(opt));
+            const cards = provider.parseCards(html);
+            assertSearchPage(html,cards,provider.emptyPattern,site);
+            info.onlineProbe[site] = {status:'ok',cards:cards.length};
+          } catch (error) {
+            info.onlineProbe[site] = {status:'error',error:error.message};
+            process.exitCode = 1;
+          }
+        }
       }
-      process.stdout.write(JSON.stringify(info, null, 2) + '\n');
+      process.stdout.write(JSON.stringify(info,null,2) + '\n');
     });
 
   try {

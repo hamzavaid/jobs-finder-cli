@@ -11,7 +11,7 @@ export function assertApiUrl(value) {
     'api.eu.lever.co':/^\/v0\/postings\/[^/]+(?:\/[^/]+)?$/,
     'api.ashbyhq.com':/^\/posting-api\/job-board\/[^/]+$/,
     'api.smartrecruiters.com':/^\/v1\/companies\/[^/]+\/postings(?:\/[\w-]+)?$/,
-    'himalayas.app':/^\/jobs\/api$/,
+    'himalayas.app':/^\/jobs\/api(?:\/search)?$/,
     'remotive.com':/^\/api\/remote-jobs$/,
     'raw.githubusercontent.com':/^\/SimplifyJobs\/(?:New-Grad-Positions|Summer2026-Internships)\/dev\/README\.md$/,
     'web.archive.org':/^\/cdx\/search\/cdx$/,
@@ -119,5 +119,5 @@ export function createApiClient({retries = 2,random = Math.random,fetchImpl = gl
   }
   let lists;
   const publicLists = () => lists ||= Promise.allSettled(PUBLIC_JOB_LISTS.map(async url => ({url,body:await request(url)}))).then(results => ({documents:results.filter(r=>r.status==='fulfilled').map(r=>r.value),errors:results.filter(r=>r.status==='rejected').map(r=>r.reason)}));
-  return {metrics,publicLists,request,text:(url,options) => request(url,options),json:(url,options) => request(url,{...options,json:true}),head:url => request(url,{method:'HEAD'})};
+  return {scheduler,metrics,publicLists,request,text:(url,options) => request(url,options),json:(url,options) => request(url,{...options,json:true}),head:url => request(url,{method:'HEAD'})};
 }

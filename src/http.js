@@ -1,3 +1,4 @@
+import {RequestScheduler} from './concurrency.js';
 import {setTimeout as sleepDelay} from 'node:timers/promises';
 /** Serialized, bounded public-page HTTP client. Never retries restricted access. */
 export class AccessError extends Error {
@@ -8,9 +9,9 @@ export function assertPublicHtml(body) {
     throw new AccessError('Access challenge or login required. This CLI does not bypass access controls.');
   }
 }
-export function createHttpClient({delayMs = 1200, timeoutMs = 15000, retries = 2, signal,
+export function createHttpClient({delayMs = 1200, timeoutMs = 15000, retries = 2, signal,maxBytes = 16*1024*1024,scheduler = new RequestScheduler({signal}),
   fetchImpl = globalThis.fetch, sleep = ms => sleepDelay(ms,undefined,{signal}), now = Date.now} = {}) {
-  if (!Number.isFinite(delayMs) || delayMs < 0 || !Number.isFinite(timeoutMs) || timeoutMs <= 0 || !Number.isInteger(retries) || retries < 0 || retries > 5) throw new Error('Invalid HTTP delay, timeout or retry configuration.');
+  if (!Number.isFinite(delayMs) || delayMs < 0 || !Number.isFinite(timeoutMs) || timeoutMs <= 0 || !Number.isInteger(retries) || retries < 0 || retries > 5 || !Number.isFinite(maxBytes) || maxBytes < 1) throw new Error('Invalid HTTP delay, timeout or retry configuration.');
   let nextAllowed = 0, queue = Promise.resolve();
   async function request(url) {
     signal?.throwIfAborted();
@@ -36,12 +37,17 @@ export function createHttpClient({delayMs = 1200, timeoutMs = 15000, retries = 2
           response = await fetchImpl(url, {
             headers: {'Accept':'text/html,application/xhtml+xml', 'Accept-Language':'en-US,en;q=0.8',
               'User-Agent':'jobs-cli/2.0 (public job listings reader; no browser automation)'},
-            signal:controller.signal, redirect:'follow'
+            signal:controller.signal, redirect:'error'
           });
           if (response.url && /\/(?:authwall|checkpoint|login|signin|member\/profile\/login)(?:[/?]|$)/i.test(new URL(response.url).pathname)) throw new AccessError(`${host}: login or access checkpoint required.`);
           if ([401,403,429,999].includes(response.status)) throw new AccessError(`${host} returned HTTP ${response.status}; access is restricted. Use the official website.`, response.status);
           if (!response.ok) throw new AccessError(`HTTP ${response.status} from ${host}.`, response.status);
-          const body = await response.text();
+          let body;
+          if (response.body?.getReader) {
+            const reader=response.body.getReader(),chunks=[];let size=0;
+            try {while(true){const part=await reader.read();if(part.done)break;size+=part.value.byteLength;if(size>maxBytes)throw new AccessError('HTML response exceeds the safe size limit.');chunks.push(part.value);}body=Buffer.concat(chunks).toString('utf8');}
+            finally {await reader.cancel().catch(()=>{});reader.releaseLock();}
+          } else {body=await response.text();if(Buffer.byteLength(body)>maxBytes)throw new AccessError('HTML response exceeds the safe size limit.');}
           assertPublicHtml(body);
           return body;
         })();
@@ -57,8 +63,8 @@ export function createHttpClient({delayMs = 1200, timeoutMs = 15000, retries = 2
       await sleep(Math.max(delayMs, 1000 * (attempt + 1)));
     }
   }
-  return {get(url) {
-    const result = queue.then(() => request(url));
+  return {scheduler,get(url) {
+    const result = queue.then(() => scheduler.run(new URL(url).hostname,() => request(url)));
     queue = result.catch(() => {});
     return result;
   }};

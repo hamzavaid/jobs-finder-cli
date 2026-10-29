@@ -12,7 +12,7 @@ export function assertBoard(board) {
   if (!board || !validBoardId(board.id) || !['global','eu'].includes(board.region || 'global')) throw new Error('Invalid ATS board identifier or region.');
   return encodeURIComponent(board.id);
 }
-export const boardKey = board => `${board.region || 'global'}:${board.id.normalize('NFC').toLowerCase()}`;
+export const boardKey = board => `${board.region || 'global'}:${board.id.normalize('NFC').toLowerCase()}${board.domain ? ':'+board.domain : ''}`;
 export function publicLink(value) {
   try {
     const url = new URL(value);

@@ -4,7 +4,7 @@ import {load} from 'cheerio';
 export const clean = value => String(value ?? '').replace(/\s+/g, ' ').trim();
 export const plainText = value => typeof value === 'string' ? clean(load(value).text()) || null : null;
 export const JOB_SCHEMA_VERSION = 2;
-export const PARSER_VERSION = 3;
+export const PARSER_VERSION = 4;
 export function validSourceDate(value) {
  if(typeof value!=='string'||!/^\d{4}-\d{2}-\d{2}(?:T.*(?:Z|[+-]\d{2}:?\d{2}))?$/.test(value)||!Number.isFinite(Date.parse(value)))return false;
  const day=value.slice(0,10);return new Date(Date.parse(day)).toISOString().slice(0,10)===day;

@@ -1,5 +1,7 @@
 # ATS extension audit and implementation record
 
+> Historical record of the original six-provider implementation. Current behavior, benchmark results and source expansion are documented in [PIPELINE_IMPROVEMENTS.md](PIPELINE_IMPROVEMENTS.md) and [ATS_ARCHITECTURE.md](ATS_ARCHITECTURE.md).
+
 Date: 2026-10-27. Baseline: clean Git worktree, 73 offline tests pass and recursive
 syntax lint passes. Reviewed CLI/argument parsing, provider registry/descriptors,
 search orchestration, HTTP client, evidence-aware filters, nullable schema,

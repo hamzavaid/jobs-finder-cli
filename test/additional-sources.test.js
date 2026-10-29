@@ -14,7 +14,7 @@ test('Personio XML stays public, preserves creation time and rejects entity decl
  const result=parsePersonio('<workzag-jobs><position><id>123</id><name>Accountant</name><office>Berlin</office><createdAt>2026-10-01T00:00:00Z</createdAt><jobDescriptions><jobDescription><value><![CDATA[Manage accounts.]]></value></jobDescription></jobDescriptions></position></workzag-jobs>',board);
  assert.equal(result.jobs[0].postedAt,null);assert.ok(result.jobs[0].createdAt);assert.equal(result.jobs[0].description,'Manage accounts.');
  assert.throws(()=>parsePersonio('<!DOCTYPE x><workzag-jobs/>',board));
- assert.equal(extractBoard('https://example.jobs.personio.com/job/123',personioProvider).region,'eu');
+ assert.equal(extractBoard('https://example.jobs.personio.com/job/123',personioProvider).domain,'com');
 });
 test('public feeds retain attribution, exact application URL, unknown dates and bounded cursors',async()=>{
  const raw={title:'Nurse',guid:'https://himalayas.app/companies/example/jobs/nurse',companyName:'Hospital',applicationLink:'https://himalayas.app/apply?utm_source=api',description:'<p>Care duties.</p>',pubDate:1790000000};

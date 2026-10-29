@@ -1,191 +1,74 @@
-# Automatic ATS pipeline
+# Automatic discovery and search architecture
 
-## Components
+This document describes the current pipeline. The original ATS audit and validation logs retain historical measurements; see [pipeline improvements](PIPELINE_IMPROVEMENTS.md) for the new milestone results.
 
-```mermaid
-flowchart TD
-  CLI[jobs find] --> R[ProviderRegistry]
-  R --> H[Existing HTML providers]
-  R --> C[CollectionManager]
-  C --> D[DiscoveryManager]
-  C --> F[FilterEngine]
-  D --> A[Public URL indexes]
-  D --> K[CacheManager]
-  C --> K
-  C --> APIs[Greenhouse / Lever / Ashby APIs]
-  CLI --> P[ProgressReporter on stderr]
-  C --> Results[Normalized results]
-  H --> Results
-  Results --> Out[Existing save/export/output modules]
-```
+## Flow and responsibilities
 
-All implementation is JavaScript. Runtime dependencies remain Cheerio, Commander,
-and robots-parser; caching, scheduling, HTTP and discovery use Node standard APIs.
+`jobs find` validates options, concurrently calls selected adapters, collects bounded candidate pools, consolidates strong identities, globally ranks, applies the result limit, and emits output. Original HTML providers retain their public search paths and server facets. Provider failures are isolated.
 
-| Module | Responsibility |
+| Component | Responsibility |
 | --- | --- |
-| `src/providers.js` | ProviderRegistry, six descriptors, existing detail dispatch |
-| `src/ats/*.js` | Provider URLs, JSON parsing, normalization and documented pagination |
-| `src/discovery.js` | Safe board extraction, resumable indexes, validation and additive inventories |
-| `src/cache.js` | Sharded versioned envelopes, locking, atomic replacement, recovery and pruning |
-| `src/collection.js` | Exact-search reuse, oldest-first refresh, board snapshots, enrichment and coverage |
-| `src/filter-engine.js` | Local ATS phrase/location matching, shared filter evidence and ranking |
-| `src/api-http.js`, `concurrency.js` | API/index scheduling, limits, cancellation, retries, Retry-After |
-| `src/progress.js` | TTY-only stderr rendering; no ownership of search state |
-| `src/search.js` | Concurrent provider execution, failure isolation and stable interleaving |
+| `providers.js` | Registry: three HTML sites, five employer ATS APIs/feeds, two global feeds, optional GitHub leads |
+| `discovery.js`, `employer-candidate.js` | Public archive/index and job-list discovery, safe board extraction, validation, additive inventories, negative expiry and resumable cursors |
+| `collection.js`, `board-scheduler.js` | Bounded refresh, query-aware scheduling, local filters, richer posting reuse and coverage accounting |
+| `relevance.js`, `filter-engine.js`, `filters.js` | Token retrieval, explicit morphology/aliases, structured decisions, hard filters and stable ranking |
+| `enrichment.js` | Common enrichJob contracts, shared in-flight work, cached-field preservation |
+| `resolution.js`, `posting-parser.js` | Lead resolution, JSON-LD/scoped microdata, one-hop ATS routing, explicit resolution states |
+| `api-http.js`, `public-http.js`, `concurrency.js` | Fixed API routes, generic public HTTPS/DNS checks, cancellation, throttling, request/body limits and retries |
+| `schema.js`, `dedup.js` | Versioned normalized records, runtime validation, conservative identity consolidation and provenance |
+| `cache.js` | Versioned JSON shards, atomic writes, manifests, process locks, recovery and pruning |
+| `pipeline-metrics.js`, `progress.js` | Counters, stderr diagnostics and optional TTY rendering |
 
-## Discovery algorithm
+No runtime dependencies were added: Commander, Cheerio and robots-parser remain the three dependencies. No keys, accounts, daemons, database servers or company inventories are required.
 
-1. Read the selected provider's inventory. Honor freshness/backoff metadata. HTML-only
-   selections never instantiate this pipeline.
-2. Select a full pass (30-day due interval) or recent pass (daily, using a 30-day
-   capture window). Query Wayback CDX over the configured ATS hostnames with URL
-   collapsing, `original` fields, a 1,000-row limit and resume keys. Process at most
-   two response pages per hostname per invocation; persist cursors to continue later.
-3. Decode the first path segment once; additionally recognize Greenhouse embed-board
-   query tokens. Normalize Unicode and deduplicate case-insensitively within region.
-   Preserve EU/global Lever identity. Reject malformed encodings, unknown hosts,
-   path separators, reserved assets, tracking fragments and non-board shapes.
-4. When Wayback has no successful response, try Common Crawl's current public index
-   using JSONL pages and a persisted page cursor. The advertised index endpoint must
-   match the official HTTPS host/path pattern. If unavailable, query one bounded
-   anonymous urlscan public-search response for the selected ATS hostnames. No scan
-   is submitted, and no private/authenticated index is used.
-5. Validate up to eight candidates per invocation with two workers. HEAD is used
-   first; unsupported/unreliable method responses (400/404/405/501) fall back to a
-   JSON GET. A GET 404/410 marks a board invalid. Access restrictions, rate limits,
-   server errors and network failures remain temporary. They do not erase previous
-   validity. Restricted/rate-limited ATS hosts stop further new collection attempts.
-6. Merge discoveries with previous inventories under a write lock. Preserve prior
-   valid boards and timestamps. Completed index passes set their completion times;
-   capped/failed passes retain cursors and partial coverage. A successful fallback
-   inventory is reused before another daily index attempt; total index failure uses
-   a shorter retry interval.
+## Discovery and scheduling
 
-Domains: `boards.greenhouse.io`, `job-boards.greenhouse.io`, `jobs.lever.co`,
-`jobs.eu.lever.co`, and `jobs.ashbyhq.com`. They are service routes, not company lists.
-No company registry, curated seed, or downloaded competitive board snapshot is
-bundled. The reference project's curated seed was deliberately not adopted. A
-generated public snapshot was considered; no independently maintained generated
-snapshot is a required dependency, so live indexes remain the source of discovery.
+Selected employer ATS providers recognize Greenhouse's two board hosts, global/EU Lever, Ashby, SmartRecruiters career/job hosts, and Personio tenant subdomains (`.de`/`.com`). Candidate identity is provider + normalized tenant + region (plus Personio host suffix; .com/.de are not geographic region claims). URLs are decoded once, malformed/static identifiers rejected, and current API validation precedes inventory acceptance. HEAD is lightweight; unsupported/unreliable responses fall back to public GET. Only confirmed 404/410 failures become invalid; transient failures retain previously valid boards.
 
-Archive URLs are data only. API requests are constructed from validated identifiers
-on fixed HTTPS hosts. The transport rejects credentials, nonstandard ports, unsafe
-encoded path separators, arbitrary destinations and redirects. Returned posting URLs
-are output links; discovery never follows them to collect data.
+Wayback CDX pages use persisted resume keys and bounded pages. Common Crawl and anonymous existing urlscan results remain fallbacks. Known public GitHub job-list formats are independent inputs, with shared per-search downloads. They supply employer candidates, never a bundled employer registry. Candidates carry observed/discovery URLs, first/last-seen timestamps, validation status and retry times. Initial list coverage is biased toward technology internships/new graduates; full employer-board collection is occupation-neutral. Archive passes remain partial until their configured traversal actually finishes.
 
-## Cache layout and schema
+Inventory TTLs: full 30 days, recent one day, validation seven days. Up to eight candidate validations and two archive pages per hostname per invocation. No outage discards valid inventory. A cold list-derived batch with enough candidates defers archive traversal and reports partial coverage.
 
-Default roots:
+Board scheduling reserves about 25% of the 64-refresh budget for unexplored boards. Remaining ordering uses company identity, time-decayed query observations, prior success/activity and fetch age. Eight query observations per employer are retained. Age prevents permanent exclusion based on old relevance. Fresh snapshots are reused; no partial search marks unvisited jobs closed.
 
-- Windows: `%LOCALAPPDATA%/jobs-finder-cli/Cache` (user-local fallback when unset).
-- macOS: `~/Library/Caches/jobs-finder-cli`.
-- Linux: `$XDG_CACHE_HOME/jobs-finder-cli`, or `~/.cache/jobs-finder-cli`.
+## Collection, enrichment and resolution
 
-`JOBS_CACHE_DIR` is an optional deployment/test override. Saved jobs continue using
-`JOBS_DB`/`LJOBS_DB`; the saved-store schema is unchanged.
+Two workers per provider and the shared scheduler across HTML/API/resolver transports bounds network work (four globally, two per API host, one for indexes). Default API/HTML timeout: 15 seconds; response cap: 16 MiB. Automatic HTML redirects are refused. Transient requests retry at most twice with exponential jitter and bounded Retry-After. Restrictions are never circumvented. Source host cooldowns and cancellation persist through scheduling.
 
-Each record is `<root>/<kind>/<sha256(key)>.json`:
+Metadata precedes selective detail collection. Greenhouse uses bulk content when several unresolved records would cost more individual calls. Other supported adapters expose enrichJob, including no-extra-request behavior when public responses already contain their available fields. Default enrichment budget: 40 per provider search, constructor-configurable; two board workers also bound concurrent enrichment. The API transport owns configurable timeout/size limits. Prediction of response bytes is intentionally absent without reliable source size estimates.
 
-```json
-{
-  "version": 1,
-  "kind": "postings",
-  "key": "Greenhouse:global:example",
-  "updatedAt": "2026-10-27T12:00:00.000Z",
-  "expiresAt": "2026-10-27T12:20:00.000Z",
-  "data": {
-    "provider": "Greenhouse",
-    "board": {"id": "example", "region": "global"},
-    "jobs": [],
-    "complete": true,
-    "pages": 1,
-    "content": false,
-    "revision": "content-fingerprint",
-    "lastSuccessfulFetchAt": "2026-10-27T12:00:00.000Z"
-  }
-}
-```
+Posting descriptions and publication dates survive lightweight refreshes. Cached full descriptions are reused across different queries. Unresolved keyword evidence is counted and disclosed; it cannot silently become proof of irrelevance. Strict filters still reject unknown required fields.
 
-The synthetic `example` above illustrates the format, not a configured board.
+Himalayas uses anonymous keyword search when keywords exist; those snapshots have a query-qualified key. Company/location-only searches use the cursor feed. Page caps and repeated pages remain partial; known expiry removes cached jobs from eligibility and bounds exact-cache TTL. Remotive collects its unfiltered public feed at six-hour freshness. Both retain source-specific attribution/restrictions and original application links.
 
-| Kind | Stored data and lifecycle |
+Optional GitHub collection reads application cells, skipping closed rows/promotions, and resolves at most eight leads per batch. Generic employer pages use robots checks and JSON-LD/scoped microdata; supported ATS links can take one additional hop. Every hop has URL validation, DNS address checks at connection time, no redirects, 15-second timeout and 4 MiB body cap. Private/reserved IPv4/IPv6 addresses and credentials are refused. Resolution states: complete, incomplete, blocked, unsupported, failed. No recursive crawler or browser automation is used.
+
+## Normalized identity, retrieval and ranking
+
+Job schema version 2 and parser version 4 retain legacy fields and add provider/board/requisition identities, employer evidence, description completeness, source date precision, canonical/application/discovery URLs, provenance, timestamps, content hash, resolution and cache states. Unknown optional values remain null. Source creation/modification times never substitute for publication. Invalid individual ATS rows are quarantined and make coverage partial rather than invalidating healthy sibling rows. Saved-store version 1 stays compatible through read-time normalization.
+
+Retrieval uses NFKC, Unicode tokens, technical-token boundaries, limited explicit morphology and equivalent aliases. All query tokens must be evidenced; quoted phrases require contiguous normalized terms. Missing descriptions can trigger enrichment. Default signal weights: phrase/title/description/aliases/freshness = 40/25/20/10/5, normalized over available signals. No AI, fuzzy technology equivalence, stemming dependency or occupation-specific default is used.
+
+Each provider contributes up to four times the requested limit, with a minimum pool of 100 and maximum 1000, subject to existing page/board limits. Global consolidation precedes global ranking and the final user limit. Recent order prioritizes trusted nonfuture publication dates; relevant order prioritizes lexical score. Dates, employer, title and qualified IDs break ties consistently.
+
+Exact provider/region/tenant/ID matches and strong verified employer/requisition or compatible observed-employer posting URLs can consolidate. Original rows and provenance remain attached; employer/requisition conflicts cannot merge. Bounded hash buckets supply possible-duplicate hints for highly similar descriptions. A name alone never establishes verified employer identity.
+
+## Cache schema and coordination
+
+OS user cache directories are unchanged; `JOBS_CACHE_DIR` is an optional override. Saved jobs remain separate. Each shard is `{version:1, kind, key, updatedAt, expiresAt, data}` with UTC ISO timestamps and validated size/schema bounds.
+
+| Kind | Data and policy |
 | --- | --- |
-| `inventory` | Provider, discovered boards, region/status, discovery/validation attempts, validation method/status, retry deadlines, index cursors, full/recent completion and coverage metadata. Inventory records do not expire wholesale. |
-| `postings` | Full normalized board snapshot independent of query filters, completeness/page count, content capability, revision, successful fetch and per-job observation times. Fresh 20 minutes; stale retention up to 7 days. |
-| `search` | Normalized semantic arguments, accepted results, warnings/coverage, inventory fingerprint and posting-shard revision references. Up to 10 minutes, shortened at job-freshness boundaries. |
+| inventory | Additive board identities, validation/query observations, cursors, discovery completeness/cooldowns; no automatic deletion of valid employers |
+| postings | Full query-independent ATS board snapshots; query-scoped Himalayas search snapshots; parser version, capabilities and semantic revision; ATS 20 min, Remotive 6 h, Himalayas 24 h, GitHub 6 h |
+| search | Semantic options/provider selection, results, revision references and inventory membership fingerprint; at most 10 min, bounded by source freshness/expiry; rolling date filters always rerun |
+| manifest | Small revision/freshness metadata; pending markers conservatively invalidate exact reuse during writes; unchanged posting revisions avoid rewriting large snapshot files |
+| resolution | Successful complete postings 6 h; incomplete/blocked/unsupported/failed outcomes 15 min |
 
-Exact keys include provider selection, search/company/location, all requested
-filters, strict/details, sort, result and page limits. They exclude output paths,
-serialization, save intent and delay. Argument case/whitespace and object-key order
-are normalized. A hit checks inventory membership/status plus referenced posting
-revisions/freshness. Partial-result hits retain warnings. Date-window searches bypass
-exact results and re-evaluate cached postings against the current UTC time.
+Writes use exclusive temporary files, atomic rename and per-shard locks. Dead-owner locks and corrupt files recover automatically. A separate refresh lock coordinates collection across CLI processes; after waiting, a process rechecks freshness. Bounded contention uses available stale cache with partial warnings. Manifest validation avoids full posting reads on exact hits. Existing stale retention remains seven days, with explicit labels and known expiry honored. Cache revision hashes exclude observation timestamps; parser changes invalidate semantics. HTTP validators are bounded in-process (eight responses up to 2 MiB each), not persisted across runs.
 
-Envelopes and payload shapes are validated. Corrupt records are quarantined and
-replaced automatically. Writes use exclusive per-shard lock files, unique temporary
-files and same-directory rename. In-process writes serialize; separate processes
-merge inventories under the same lock. Old locks with dead owners recover
-automatically. Once atomic replacement starts it finishes even on cancellation.
-Pruning removes old search shards, posting snapshots outside stale retention, and
-orphan/quarantined files while respecting writer locks. Valid inventories survive.
+## Verification and limits
 
-Temporary refresh failure leaves valid snapshots unchanged. Partial Lever pages
-merge with prior entries, retaining observation times; unvisited entries are not
-declared closed. Old rows expire from cache use without a closed-job inference.
-Increasing a page cap refreshes insufficient truncated snapshots. Optional cache
-write errors produce warnings while retaining successfully collected results.
+`npm test` is offline, including actual CLI subprocesses and cross-process coordination. `npm run benchmark` uses synthetic provisional relevance/identity labels, not human-validated ground truth. CI covers Node 20/22/24 on Windows/Linux; optional `test:live` remains outside CI. Hosted CI status is distinct from local runs.
 
-## Scheduling and limits
-
-Selected provider tasks run concurrently. API/index transport permits four requests
-globally and two per API host, with one lane for each archive/public index host.
-Existing HTML providers share a separate serialized client, giving an overall
-maximum of five active HTTP lanes per process. Host starts are spaced by `--delay`;
-archive minimums are 1.1 seconds and public-scan search minimums 2.1 seconds.
-
-Requests have a 15-second body-inclusive timeout, 16 MiB decoded-response cap,
-up to two transient retries with exponential backoff/jitter, and Retry-After handling
-for seconds or HTTP dates. A cooldown received while a caller waits also delays that
-caller. Delays beyond 30 seconds are surfaced as backoff instead of blocking the CLI
-indefinitely. API 403/401 are not retried; HTML 429 is also never retried.
-
-Collection uses two board workers per provider, at most 64 network board refreshes
-per invocation and at most 200 Greenhouse detail requests. Fresh cached shards can
-still be searched beyond the refresh budget. Only two posting shards are decoded
-concurrently; matches are trimmed to bounded top candidates. Filtering periodically
-yields for cancellation. API pagination follows `--pages`; Lever uses skip/limit.
-
-## Normalization, filters and output
-
-Jobs retain the existing nullable schema plus `boardId`, `region`, `providerJobId`,
-`companyEvidence`, `cacheStatus`, `cacheFetchedAt`, and source timestamps. ATS IDs
-include region/board/raw posting ID; saved keys remain `source:id`.
-
-Greenhouse requests descriptions only with `--details`; date/strict enrichment
-fetches matching job details as needed and reuses those details while cached. Lever
-creation times and Greenhouse modification times never become posting dates. Ashby
-workplace types take precedence over the ambiguous remote-eligibility boolean.
-Unknown applicant/verification fields remain null. Employer names use observed
-metadata when available; otherwise board labels are explicitly identified as inferred.
-
-FilterEngine performs literal case-insensitive phrase matching over title/available
-description, local location/secondary-location matching, and shared evidence-aware
-criteria. It ranks each provider's accepted jobs by trustworthy posting date or
-title relevance. Final output preserves existing provider-order interleaving. Specific
-identical URLs can yield duplicate hints; distinct requisitions are never merged
-because titles/companies happen to match.
-
-The CLI owns SIGINT, AbortController and ProgressReporter cleanup. Diagnostics go to
-stderr with bounded summaries. JSON/CSV/JSONL stdout is clean. Recognized empty
-searches exit 0, all-provider failures exit 1 and cancellation exits 130.
-
-## Primary references
-
-- [Greenhouse public Job Board API](https://docs.greenhouse.io/job-board)
-- [Lever Postings API](https://github.com/lever/postings-api)
-- [Ashby Job Postings API](https://developers.ashbyhq.com/docs/public-job-posting-api)
-- [Internet Archive CDX protocol](https://github.com/internetarchive/wayback/tree/master/wayback-cdx-server)
-- [Common Crawl public index](https://index.commoncrawl.org/)
-- [urlscan API access](https://docs.urlscan.io/pages/api-intro)
-- [Reference discovery methodology](https://github.com/mherzog4/job-boards)
+Coverage is bounded and reported. Neither archive discovery nor public lists enumerate all employers. Generic HTML without trustworthy posting metadata stays unsupported. Shared anonymous API allowances and public access restrictions can still block collection. No SQLite migration, universal HTML selector guessing, persistent HTTP response-body store, or learned ranking model was added without measured need.

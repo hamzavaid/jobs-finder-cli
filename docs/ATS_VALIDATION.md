@@ -1,5 +1,7 @@
 # ATS engineering validation
 
+> Historical record of the original six-provider implementation. Current behavior, benchmark results and source expansion are documented in [PIPELINE_IMPROVEMENTS.md](PIPELINE_IMPROVEMENTS.md) and [ATS_ARCHITECTURE.md](ATS_ARCHITECTURE.md).
+
 Validated 2026-10-27. Implementation follows ten sequential phases with a descriptive
 Git commit per phase. All application and test code is JavaScript; no credentials,
 paid services, required accounts, proxies or company registry were added.

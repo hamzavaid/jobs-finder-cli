@@ -146,7 +146,8 @@ export async function runCli(argv = process.argv) {
     .action(raw => {
       const opts = normalizeOptions({...raw, limit: 1, pages: 1});
       for (const site of opts.websites) {
-        if (providers[site].kind && ['ats','feed'].includes(providers[site].kind)) eprint(`${site}: company-specific URLs are discovered automatically by jobs find; no global search URL exists.`);
+        if (providers[site].kind === 'ats') eprint(`${site}: company-specific URLs are discovered automatically by jobs find; no global search URL exists.`);
+        else if (providers[site].kind === 'feed') eprint(`${site}: public feed or posting leads are collected automatically by jobs find; no HTML search URL is generated.`);
         else process.stdout.write(providers[site].searchUrl(opts,0) + '\n');
       }
     });

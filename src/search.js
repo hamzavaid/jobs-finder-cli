@@ -16,7 +16,7 @@ export async function findJobs(options, http, context = {}) {
   let successfulProviders = 0;
   let collection;
   if ((options.websites ?? Object.keys(providers)).some(site => ['ats','feed'].includes(providers[site]?.kind))) {
-    collection = context.collection || new CollectionManager({...context,http:context.apiHttp || createApiClient({signal:context.signal,delayMs:options.delay})});
+    collection = context.collection || new CollectionManager({...context,http:context.apiHttp || createApiClient({signal:context.signal,delayMs:options.delay,scheduler:http?.scheduler})});
   }
   const initialTransport = {...collection?.http?.metrics};
   const candidateOptions = {...options,limit:Math.min(1000,Math.max(100,options.limit * 4))};

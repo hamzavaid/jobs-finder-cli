@@ -14,7 +14,7 @@ export function extractBoard(value,provider) {
     const id = provider.name === 'Personio' ? url.hostname.split('.')[0] : provider.name === 'Greenhouse' && first === 'embed'
       ? url.searchParams.get('for') : decodeURIComponent(first || '');
     if (!validBoardId(id)) return null;
-    return {provider:provider.name,id:id.normalize('NFC'),region:url.hostname === 'jobs.eu.lever.co' || provider.name === 'Personio' && url.hostname.endsWith('.com') ? 'eu' : 'global'};
+    return {provider:provider.name,id:id.normalize('NFC'),region:url.hostname === 'jobs.eu.lever.co' ? 'eu' : 'global',...(provider.name === 'Personio' ? {domain:url.hostname.endsWith('.com') ? 'com' : 'de'} : {})};
   } catch {return null;}
 }
 export function parseCdx(body) {
@@ -83,7 +83,8 @@ export class DiscoveryManager {
     Object.assign(this,{cache,http,now,maxPages,maxValidations,fallback,report,signal});
   }
   async ensure(provider) {
-    const previous = (await this.cache.read('inventory',provider.name))?.data;
+    let previous = (await this.cache.read('inventory',provider.name))?.data;
+    if (provider.name === 'Personio' && previous) previous = {...previous,boards:previous.boards.map(board => ({...board,domain:board.domain || (board.region === 'eu' ? 'com' : 'de'),region:'global'}))};
     const inventory = structuredClone(previous || {provider:provider.name,boards:[],cursors:{},revision:randomUUID()});
     if ((inventory.nextDiscoveryAt && time(inventory.nextDiscoveryAt) > this.now()) || (this.now() - time(inventory.lastFullAt) < DISCOVERY_TTL.full && this.now() - time(inventory.lastRecentAt) < DISCOVERY_TTL.recent)) {
       this.report(provider.name,'cached boards loaded');

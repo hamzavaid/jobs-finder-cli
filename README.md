@@ -1,6 +1,7 @@
 # Jobs Finder CLI (`jobs`)
 
-Search **LinkedIn, Indeed, Glassdoor, Greenhouse, Lever, and Ashby** from one Node.js
+Search **LinkedIn, Indeed, Glassdoor, Greenhouse, Lever, Ashby, SmartRecruiters,
+Personio, Himalayas, and Remotive** from one Node.js
 command. Searches work across occupations, including chefs, accountants, nurses,
 electricians, and engineers.
 
@@ -28,13 +29,17 @@ or `node bin/jobs.js`.
 
 ```bash
 jobs find --search "Chef"
+jobs find --search "Nurse" --website SmartRecruiters Personio Himalayas Remotive --sort relevant
+jobs find --search "Intern" --website GitHub --format json
 jobs find --search "Accountant" --website Greenhouse Lever Ashby
 jobs find --search "Nurse" --website LinkedIn Ashby --location "Boston"
 jobs find --search "Electrician" --website LinkedIn Indeed Glassdoor Greenhouse Lever Ashby
 jobs find --search "Teacher" --website Ashby --remote true --save --format json
 ```
 
-Omitting `--website` selects **all six** providers. Names are case-insensitive;
+Omitting `--website` selects **all ten** providers above. **GitHub** is an optional
+source that resolves direct application links from public internship/new-grad lists;
+select it with `--website GitHub`. Its narrower list coverage is not a general job index. Names are case-insensitive;
 multiple values, comma-separated names, and repeated flags work. Duplicates are
 removed while preserving the requested order:
 
@@ -53,8 +58,9 @@ invalid options fail with a descriptive error.
 On the first ATS search, the CLI finds public company boards, checks their current
 APIs, retrieves postings, and filters them locally. It builds its own inventory;
 there is no bundled or manually maintained company list. Discovery uses public
-archive indexes, with anonymous public-index fallbacks when an archive is unavailable.
-Only selected ATS providers trigger discovery. A LinkedIn-only search never starts it.
+archive indexes, anonymous public-index fallbacks, and direct application links from
+public job lists. Known list formats are a discovery source, not a company registry.
+Selected employer-scoped ATS providers trigger discovery; global feeds do not need employer inventories. A LinkedIn-only search never starts it.
 
 First searches can take tens of seconds or minutes, depending on archive availability,
 network delays and board size. Work runs in bounded batches. **A partial-coverage
@@ -67,7 +73,7 @@ Repeated searches reuse three independent cache layers:
 | Cache | Normal refresh behavior |
 | --- | --- |
 | Company boards | Full discovery due after 30 days; recent discovery daily; validation around every 7 days |
-| Board postings | Fresh for 20 minutes; only missing/stale or insufficient board snapshots are refreshed |
+| Board postings | ATS snapshots fresh for 20 minutes; Remotive six hours, Himalayas one day; only missing/stale or insufficient board snapshots are refreshed |
 | Identical searches | Up to 10 minutes, bounded by underlying posting freshness and revision checks |
 
 Short batches can span multiple searches; discovery completion means the configured
@@ -76,6 +82,11 @@ never discards previously valid boards. Temporary failures can use labeled stale
 for up to seven days. Expired data is not presented as current. Partial-search cache
 hits keep their warnings. Rolling `--date` searches re-evaluate time filters rather
 than reuse potentially outdated exact results.
+
+Small revision manifests validate repeated searches without loading every posting
+snapshot. Unchanged collections renew freshness without rewriting large snapshots.
+Cross-process locks coordinate refreshes, and enriched descriptions survive lighter
+refreshes. Negative resolution outcomes expire automatically.
 
 Caches live in the operating system's user cache directory, separate from saved
 jobs and the repository. Corrupt cache records recover automatically. Normal use
@@ -86,8 +97,8 @@ root with `JOBS_CACHE_DIR`; this is optional.
 
 | Argument | Default | Meaning |
 | --- | --- | --- |
-| `--website <sites...>` | all six | Select any supported providers |
-| `--search <keywords>` | none | Provider query on HTML sites; local literal phrase over title/available description on ATS sites |
+| `--website <sites...>` | all ten enabled sources | Select any supported providers |
+| `--search <keywords>` | none | Provider query on HTML sites; local token-aware matching over title and available description on ATS/feed sources |
 | `--company <name>` | none | Normalized equality, ignoring common legal suffixes and punctuation |
 | `--location <place>` | none | Server query on LinkedIn/Indeed; local case-insensitive substring on Glassdoor/ATS locations |
 | `--date <duration>` | none | Integer `Nh`, `Nd`, `Nw`; 1 hour through 365 days; `1d` is past 24 hours |
@@ -100,7 +111,7 @@ root with `JOBS_CACHE_DIR`; this is optional.
 | `--limit <n>` | `25` | Combined result cap, integer 1–200; not a promised minimum |
 | `--pages <n>` | `5` | Page cap per paginated board/provider, integer 1–20; does not set the company-discovery batch size |
 | `--delay <ms>` | `1200` | Minimum request-start spacing, integer 750–30000; archive services can impose larger minimums |
-| `--sort <order>` | `recent` | `recent` or `relevant`; local ranking within ATS results, URL hint on supported HTML sites |
+| `--sort <order>` | `recent` | `recent` or `relevant`; global date-first or relevance-first ranking, with stable tie-breaking |
 | `--details` | off | Enrich candidates; request full Greenhouse descriptions |
 | `--strict` | off | Require reliable evidence for requested filters; exclude unconfirmed server-facet matches |
 | `--save` | off | Upsert accepted jobs into the local saved-job store |
@@ -124,10 +135,15 @@ optional field. It does not guarantee that a vacancy remains open after a cached
 
 | Provider | Important limits |
 | --- | --- |
-| Greenhouse | Default list searches use titles without downloading all descriptions. Add `--details` for description matching. Date filtering fetches candidate details for the original publication date; modification time is kept separately. Detail work is bounded and incomplete coverage is reported. |
+| Greenhouse | Lightweight titles are followed by selective description enrichment when needed; multiple unresolved records can use bulk content. Add `--details` for fuller candidates. Date filtering fetches candidate details for the original publication date; modification time is kept separately. Detail work is bounded and incomplete coverage is reported. |
 | Lever | Supports global/EU boards and public API pagination. Creation timestamps are retained separately; they are not treated as public posting dates. `--date` excludes jobs without a trustworthy publication date. |
 | Ashby | Uses published dates and explicit workplace metadata. Hybrid jobs can also have `isRemote=true`; that boolean alone does not establish remote-only work. Unlisted postings are excluded. |
-| All ATS providers | Filters are local. Applicant counts and verification are unsupported/unknown and do not produce matches. Seniority requires explicit metadata, never a title guess. Location matching includes available secondary locations but is not geocoding or radius search. |
+| SmartRecruiters | Anonymous PUBLIC postings only; employer-scoped discovery, offset pagination and selective section details. Internal postings are never requested. |
+| Personio | Only employer-enabled public XML feeds. Company feeds may be empty or disabled; creation timestamps are not publication dates. Nonempty parsing is fixture-tested; the recorded live feed was empty. |
+| Himalayas | Anonymous keyword search with page pagination, or cursor feed for company/location-only searches; daily freshness. Page limits leave coverage partial; location restrictions and explicit expiry are retained. Application links remain unchanged. |
+| Remotive | Public remote feed, six-hour minimum normal refresh, source-attributed URLs; jobs are delayed by the source. Timestamps without timezone remain unknown. |
+| GitHub (optional) | Application cells from two known public list formats supply leads, with no bundled employers. At most eight posting resolutions per batch; snippets and unresolved links are excluded with partial diagnostics. Employer pages require permitted public JSON-LD or scoped microdata, and robots permission. |
+| All ATS/feed sources | Filters are local. Applicant counts and verification are unsupported/unknown and do not produce matches. Seniority requires explicit metadata, never a title guess. Location matching includes available secondary locations but is not geocoding or radius search. |
 | LinkedIn | Some URL facets are accepted without observable evidence in normal mode; `--strict` excludes them. Applicant lower bounds are not exact counts. |
 | Indeed | Public access may be blocked. Date URL buckets are coarse; non-equivalent durations require local evidence. Several workplace/experience/employment filters lack reliable equivalents. |
 | Glassdoor | Public access, detail routes and pagination can be restricted. No unverified server facets are claimed; unknown unsupported criteria exclude candidates. |
@@ -135,17 +151,33 @@ optional field. It does not guarantee that a vacancy remains open after a cached
 Employer display names use source metadata where available. Where an ATS exposes
 only its board label, `companyEvidence` is `board-identifier`; strict company filtering
 does not treat that inferred label as a verified employer name. ATS salary objects
-and HTML salary labels retain their source representation.
+and HTML salary labels retain their source representation. Structured currencies/periods are kept only where valid;
+raw labels are not converted into comparable annual amounts.
 
 HTML results relying on a supported but unobserved facet have
 `linkedin-facet-unconfirmed` or `indeed-facet-unconfirmed` evidence and an
 `unconfirmedFilters` list. Observed contradictions always exclude a posting.
 Calendar dates are evaluated conservatively when time/timezone are missing.
 
-Results interleave in selected provider order and respect the total limit. Sorting
-within a provider does not create a global date sort. Source-qualified IDs preserve
-distinct requisitions and separate websites. Specific identical posting URLs can
-produce `possibleDuplicateOf` hints; those records are retained, not merged by title.
+Searches combine bounded candidate pools from every selected provider, consolidate
+strong duplicate identities, rank globally, and then apply the total limit. With
+`--sort relevant`, title phrases/token coverage, available description evidence,
+small explicit equivalent aliases and trustworthy freshness determine rank.
+`--sort recent` prioritizes known, nonfuture publication dates. Employer, title and
+source-qualified ID break ties deterministically. Hard filters always apply.
+
+Lexical matching normalizes Unicode, supports limited variants such as
+engineer/engineering, and recognizes RN/registered nurse and CPA/certified public
+accountant. Java and JavaScript remain distinct, as do C, C++ and C#.
+Quote a phrase inside the argument to require contiguous normalized terms:
+`jobs find --search '"registered nurse"' --website Ashby --sort relevant`.
+Missing descriptions trigger bounded enrichment where an adapter supports it;
+remaining incomplete evidence is reported as partial coverage, not proven irrelevance.
+
+Only exact or strong compatible identities consolidate. Original source records and
+provenance remain attached in JSON/CSV; title collisions never establish identity.
+Lower-confidence similarities retain separate rows with `possibleDuplicateOf` hints.
+Conflicting employers or requisition IDs remain separate.
 
 ## Progress, failures, and cancellation
 
@@ -178,7 +210,7 @@ Use site data only where authorized under the providers' terms.
 | `saved` | Local `--search`, `--company`, multi-value `--website`, positive `--limit`, `--format table|json|jsonl|csv`, `-o/--output`; all sources by default |
 | `export` | Requires `-o/--output`; `--format json|jsonl|csv` (csv default), `--search`, `--company`, multi-value `--website`; no network |
 | `stats` | Optional multi-value `--website`; JSON totals by website/company/employment/location; no network |
-| `url` | Search filters above, without execution/output flags; prints supported HTML search URLs. ATS providers have no global query URL, so it explains that `find` handles discovery automatically. No network. |
+| `url` | Search filters above, without execution/output flags; prints supported HTML search URLs. API/feed sources are collected through `find`, so it explains that `find` handles discovery automatically. No network. |
 | `doctor` | Runtime/store info; `--website <sites...>`, optional `--probe` and `--search` (probe default `chef`). ATS probes can discover boards but collect at most one board; partial coverage is reported. |
 | `help [command]`, `[command] --help` | Show all command options |
 | `--version`, `-V` | Print CLI version |
@@ -190,7 +222,9 @@ jobs stats --website Greenhouse Lever Ashby
 jobs doctor --probe --website Ashby
 ```
 
-JSON and JSONL retain full records. CSV includes descriptions, salary, board/source
+JSON and JSONL retain full records. CSV includes descriptions, salary, provenance,
+original records for consolidated jobs, application/source URLs, attribution and
+redistribution restrictions, board/source
 identity, employer evidence, and `cacheStatus`/`cacheFetchedAt`. CSV quotes embedded
 delimiters/newlines and neutralizes spreadsheet formula prefixes. Tables sanitize
 terminal controls. Stale records are explicitly labeled in structured exports and
@@ -201,6 +235,16 @@ Saved jobs are separate from disposable caches. The saved store defaults to
 overrides it; legacy `LJOBS_DB` remains supported. Source-less legacy rows remain
 LinkedIn, and older unprefixed IDs migrate when resaved. No existing saved data is
 deleted by discovery or search filtering.
+
+### Source attribution and use
+
+Himalayas and Remotive results retain source links and attribution in all output
+formats. Their public terms prohibit onward syndication to third-party job boards
+or aggregators. Exports are for your own permitted use; preserve their attribution
+and restrictions. Himalayas application URLs are preserved unchanged. The CLI does
+not request or configure keys, including optional free keys offered by a source.
+See [Himalayas terms and API](https://himalayas.app/api) and
+[Remotive public API terms](https://github.com/remotive-com/remote-jobs-api).
 
 ## Troubleshooting
 
@@ -223,8 +267,10 @@ deleted by discovery or search filtering.
   requested saves fail explicitly rather than silently dropping data.
 
 LinkedIn live parsing was previously verified; Indeed and Glassdoor returned 403
-in the recorded checks. All three ATS APIs and bounded automatic discovery/collection
-were tested successfully on 2026-10-27, with partial discovery coverage disclosed.
+in the recorded checks. The original three ATS APIs were tested on 2026-10-27. On 2026-10-28, live adapters
+parsed SmartRecruiters (3 jobs), Himalayas (20, partial page budget), and Remotive
+(11); Personio returned valid empty XML. Optional GitHub resolution produced two
+complete postings from two leads, including a public employer page.
 Website/API availability can change.
 
 ## Tests and CI
@@ -233,13 +279,14 @@ Website/API availability can change.
 npm ci
 npm run lint
 npm test
+npm run benchmark
 npm audit
 ```
 
 Standard tests use fixtures and mocked responses, including real CLI subprocesses.
 They do not require job websites, archive services, API keys, accounts, or seeded
 company inventories. Lint checks all JavaScript syntax. GitHub Actions runs clean
-installation, lint, tests, and offline CLI checks on Node 20/22/24 across Ubuntu and
+installation, lint, tests, and offline CLI checks and the offline benchmark on Node 20/22/24 across Ubuntu and
 Windows, with pinned actions and read-only repository permissions.
 
 Optional, low-volume live smoke checks are separate from CI:
@@ -254,7 +301,13 @@ automatically discover boards and intentionally collect only a small sample. The
 report partial coverage and can fail or return no matches when public services are
 unavailable; they are not a complete harvest or proof of every filter.
 
-Technical details: [architecture and cache schema](docs/ATS_ARCHITECTURE.md),
+Run `npm run benchmark` for reproducible offline retrieval, identity and cache
+measurements. Its labels are synthetic/provisional and the fixture set is small.
+On the initial fixture run, recall rose from 0.75 to 1.00 and NDCG@10 from 0.731 to
+1.00; cold/warm mocked collection took about 67/7 ms with 3/0 requests. These are
+regression measurements, not live coverage or production latency guarantees.
+
+Technical details: [pipeline improvements and limitations](docs/PIPELINE_IMPROVEMENTS.md), [architecture and cache schema](docs/ATS_ARCHITECTURE.md),
 [audit and phase log](docs/ATS_PIPELINE_AUDIT.md),
 [validation, performance, and remaining limits](docs/ATS_VALIDATION.md).
 

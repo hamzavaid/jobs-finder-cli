@@ -15,7 +15,7 @@ export function employerCandidate(board,{url,method,employer,now=Date.now()}={})
 /** Known public list tables: application cells only; skip promotions and closed rows. */
 export function extractJobListLeads(body,{base}={}) {
  const $=load(body||''),links=new Set();
- $('table tbody tr').each((_,row)=>{const cells=$(row).find('td');if(cells.length<4||$(row).text().includes('??'))return;for(const link of extractPublicLinks($(cells[3]).html(),{base}))links.add(link);});
- for(const line of String(body||'').split('\n'))if(line.trim().startsWith('|')&&!line.includes('??'))for(const link of extractPublicLinks(line,{base}))links.add(link);
+ $('table tbody tr').each((_,row)=>{const cells=$(row).find('td');if(cells.length<4||$(row).text().includes('\u{1f512}'))return;for(const link of extractPublicLinks($(cells[3]).html(),{base}))links.add(link);});
+ for(const line of String(body||'').split('\n'))if(line.trim().startsWith('|')&&!line.includes('\u{1f512}'))for(const link of extractPublicLinks(line,{base}))links.add(link);
  return [...links].slice(0,5000);
 }

@@ -1,4 +1,5 @@
 import {scheduleBoards,observeBoard} from './board-scheduler.js';
+import {normalizeText} from './relevance.js';
 import {PARSER_VERSION} from './schema.js';
 import {CacheManager,CACHE_TTL,stableKey} from './cache.js';
 import {DiscoveryManager,inventoryFingerprint,mergeInventory} from './discovery.js';
@@ -39,7 +40,7 @@ export class CollectionManager {
     if (!boards.length) throw new Error(`${provider.name}: no validated boards available${discovery.errors.length ? '; ' + discovery.errors.join(' | ') : '; discovery or validation is incomplete'}.`);
     stats.boardsKnown = boards.length;
     const engine = new FilterEngine(options,{now:this.now}), results = new Map(),refs = [],changes = [];
-    let snapshots = boards.map(board => ({board,key:`${provider.name}:${boardKey(board)}`}));
+    let snapshots = boards.map(board => ({board,key:`${provider.name}:${boardKey(board)}${provider.searchScoped ? ":query:"+stableKey(normalizeText(options.search)) : ""}`}));
     // Read large posting shards only inside the two-worker loop, never all at once.
     snapshots = scheduleBoards(snapshots,options,{now:this.now(),budget:this.maxBoards});
     stats.boardsScheduled = Math.min(this.maxBoards,boards.length);
@@ -60,7 +61,7 @@ export class CollectionManager {
         refreshes++;
         try {
           if (options.company && provider.fetchCompany && !board.company) board.company = await provider.fetchCompany(board,this.http);
-          const outcome = await provider.fetchBoard(board,this.http,{pages:options.pages,content:contentNeeded,cache:this.cache,signal:this.signal});
+          const outcome = await provider.fetchBoard(board,this.http,{pages:options.pages,content:contentNeeded,cache:this.cache,signal:this.signal,search:options.search});
           const boardRetryAt = outcome.errorStatus ? outcome.retryAt || new Date(this.now() + 15 * 60000).toISOString() : null;
           if ([401,403,429].includes(outcome.errorStatus)) {providerBlocked = true;inventory.providerRetryAt = boardRetryAt;}
           stats.schemaRejected = (stats.schemaRejected || 0) + (outcome.rejected || 0);stats.pages += outcome.pages;stats.resolutionAttempts = (stats.resolutionAttempts || 0) + (outcome.resolutionAttempts || 0);stats.resolutionSuccesses = (stats.resolutionSuccesses || 0) + (outcome.resolutionSuccesses || 0);
@@ -107,6 +108,7 @@ export class CollectionManager {
       for (let job of record.data.jobs) {
         if (stats.cardsSeen && stats.cardsSeen % 512 === 0) {await new Promise(resolve => setImmediate(resolve));this.signal?.throwIfAborted();}
         stats.cardsSeen++;
+        if (job.expiresAt && Date.parse(job.expiresAt) <= this.now()) continue;
         if (job.lastObservedAt && this.now() - Date.parse(job.lastObservedAt) > CACHE_TTL.stale) continue;
         const initial = engine.evaluate(job);
         const needsContent = initial.needsEnrichment || options.details && job.descriptionCompleteness !== 'complete';
@@ -159,7 +161,7 @@ export class CollectionManager {
     const jobs = engine.sort([...results.values()]).slice(0,options.limit);
     if (!stats.staleBoards && !options.dateSeconds) {
       const changed = new Map(changes.map(board => [boardKey(board),board]));
-      const ttl = Math.max(0,Math.min(CACHE_TTL.search,...jobs.map(job => (Date.parse(job.cacheFetchedAt) || this.now()) + (job.cacheStatus === 'stale' ? CACHE_TTL.stale : sourceTtl) - this.now())));
+      const ttl = Math.max(0,Math.min(CACHE_TTL.search,...jobs.map(job => job.expiresAt ? Date.parse(job.expiresAt)-this.now() : CACHE_TTL.search),...jobs.map(job => (Date.parse(job.cacheFetchedAt) || this.now()) + (job.cacheStatus === 'stale' ? CACHE_TTL.stale : sourceTtl) - this.now())));
       try {await this.cache.put('search',key,{jobs,stats,refs,inventoryFingerprint:inventoryFingerprint({...inventory,boards:inventory.boards.map(board => changed.get(boardKey(board)) || board)})},{ttl});}
       catch (error) {if (error.name === 'AbortError') throw error;stats.errors.push(`${provider.name}: search cache write failed: ${error.message}`);}
     }

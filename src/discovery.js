@@ -1,3 +1,4 @@
+import {extractPublicLinks,employerCandidate} from './employer-candidate.js';
 import {createHash,randomUUID} from 'node:crypto';
 import {validBoardId,boardKey} from './ats/shared.js';
 
@@ -92,6 +93,12 @@ export class DiscoveryManager {
     const errors = [], candidates = new Map(inventory.boards.map(board => [boardKey(board),board]));
     const mode = this.now() - time(inventory.lastFullAt) >= DISCOVERY_TTL.full ? 'full' : 'recent';
     let allDone = true, archiveSucceeded = false;
+    if (this.http.publicLists && this.now()-time(inventory.lastPublicListAt)>=DISCOVERY_TTL.recent) {
+      const leads = await this.http.publicLists();this.signal?.throwIfAborted();
+      for (const doc of leads.documents) for (const value of extractPublicLinks(doc.body,{base:doc.url})) this.addCandidate(candidates,value,provider,'github-public-list');
+      if (leads.documents.length) inventory.lastPublicListAt = new Date(this.now()).toISOString();
+      if (leads.errors.length) errors.push('Public job lists: some sources unavailable; retained archive discovery.');
+    }
     for (const domain of provider.domains) {
       this.signal?.throwIfAborted();
       const cursorKey = `${mode}:${domain}`;
@@ -119,7 +126,7 @@ export class DiscoveryManager {
       inventory.cursors[cursorKey] = {resumeKey,from,done,completedAt:done ? new Date(this.now()).toISOString() : null};
       allDone &&= done;
     }
-    if (!archiveSucceeded && this.fallback) {
+    if (!archiveSucceeded && this.fallback && candidates.size < this.maxValidations) {
       try {await this.commonCrawl(provider,candidates,inventory);}
       catch (error) {
         if (error.name === 'AbortError') throw error;errors.push(`Common Crawl: ${error.message}`);
@@ -165,7 +172,7 @@ export class DiscoveryManager {
     const key = boardKey(candidate), old = candidates.get(key);
     if (!old && candidates.size >= 50000) throw new Error('Discovery inventory size limit reached; coverage is partial.');
     const stamp = new Date(this.now()).toISOString();
-    candidates.set(key,{...candidate,status:'pending',firstDiscoveredAt:stamp,...old,lastDiscoveredAt:stamp,discoveredBy});
+    candidates.set(key,{...employerCandidate(candidate,{url:value,method:discoveredBy,now:this.now()}),firstDiscoveredAt:stamp,...old,lastSeenAt:stamp,lastDiscoveredAt:stamp,discoveredBy});
   }
   async commonCrawl(provider,candidates,inventory) {
     const collections = await this.http.json('https://index.commoncrawl.org/collinfo.json');

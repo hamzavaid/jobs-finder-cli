@@ -1,3 +1,4 @@
+import {PUBLIC_JOB_LISTS} from './employer-candidate.js';
 import {setTimeout as delay} from 'node:timers/promises';
 import {AccessError} from './http.js';
 import {RequestScheduler} from './concurrency.js';
@@ -12,6 +13,7 @@ export function assertApiUrl(value) {
     'api.smartrecruiters.com':/^\/v1\/companies\/[^/]+\/postings(?:\/[\w-]+)?$/,
     'himalayas.app':/^\/jobs\/api$/,
     'remotive.com':/^\/api\/remote-jobs$/,
+    'raw.githubusercontent.com':/^\/SimplifyJobs\/(?:New-Grad-Positions|Summer2026-Internships)\/dev\/README\.md$/,
     'web.archive.org':/^\/cdx\/search\/cdx$/,
     'index.commoncrawl.org':/^\/(?:collinfo\.json|CC-MAIN-\d{4}-\d{2}-index)$/,
     'urlscan.io':/^\/api\/v1\/search\/$/
@@ -108,5 +110,7 @@ export function createApiClient({retries = 2,random = Math.random,fetchImpl = gl
       }
     }
   }
-  return {request,text:(url,options) => request(url,options),json:(url,options) => request(url,{...options,json:true}),head:url => request(url,{method:'HEAD'})};
+  let lists;
+  const publicLists = () => lists ||= Promise.allSettled(PUBLIC_JOB_LISTS.map(async url => ({url,body:await request(url)}))).then(results => ({documents:results.filter(r=>r.status==='fulfilled').map(r=>r.value),errors:results.filter(r=>r.status==='rejected').map(r=>r.reason)}));
+  return {publicLists,request,text:(url,options) => request(url,options),json:(url,options) => request(url,{...options,json:true}),head:url => request(url,{method:'HEAD'})};
 }

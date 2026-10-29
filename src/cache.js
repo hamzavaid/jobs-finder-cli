@@ -225,14 +225,32 @@ export class CacheManager {
         const path = join(directory,file), info = await stat(path).catch(() => null);
         if (!info || this.now() - info.mtimeMs < DAY) continue;
         if (/\.(?:tmp|corrupt)-/.test(file) || (['search','resolution'].includes(kind) && this.now() - info.mtimeMs > DAY) || (['postings','manifest'].includes(kind) && this.now() - info.mtimeMs > CACHE_TTL.stale)) {
-          // Hold the writer's lock and recheck age to avoid deleting a fresh replacement.
-          let lock;
-          try {lock = await open(path + '.lock','wx',0o600);}
-          catch (error) {if (error.code === 'EEXIST') continue; throw error;}
+          let commit,commitPath,lock;
           try {
-            const current = await stat(path).catch(() => null);
-            if (current && current.mtimeMs === info.mtimeMs) await rm(path,{force:true});
-          } finally {await lock.close(); await rm(path + '.lock',{force:true});}
+            if(kind==='postings' && file.endsWith('.json')) {
+              let metadata;
+              try {metadata=JSON.parse(await readFile(join(this.root,'manifest',file),'utf8'));}catch{}
+              let key=metadata?.key;
+              if(typeof key!=='string'||stableKey(key)+'.json'!==file) {
+                try {key=JSON.parse(await readFile(path,'utf8')).key;}catch{}
+              }
+              if(typeof key!=='string'||stableKey(key)+'.json'!==file)continue;
+              commitPath=this.path('postings',key+':commit')+'.lock';
+              try {commit=await open(commitPath,'wx',0o600);await commit.writeFile(JSON.stringify({pid:process.pid}));}
+              catch(error){if(error.code==='EEXIST')continue;throw error;}
+              const manifest=await this.rawRead('manifest',key).catch(()=>null);
+              // An old immutable file can still back a currently observed board.
+              // Coordinate with snapshot/manifest commits before deciding to remove it.
+              if(manifest?.data.pending || manifest && sameStamp(manifest.data.snapshotStamp,fileStamp(info)) && validManifestTimes(manifest,this.now()) && this.usableStale(manifest))continue;
+            }
+            try {lock=await open(path+'.lock','wx',0o600);}
+            catch(error){if(error.code==='EEXIST')continue;throw error;}
+            const current=await stat(path).catch(()=>null);
+            if(current && current.mtimeMs===info.mtimeMs)await rm(path,{force:true});
+          } finally {
+            if(lock){await lock.close();await rm(path+'.lock',{force:true});}
+            if(commit){await commit.close();await rm(commitPath,{force:true});}
+          }
         }
       }
     }

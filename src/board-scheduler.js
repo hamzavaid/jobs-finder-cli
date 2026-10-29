@@ -6,9 +6,11 @@ export function scheduleBoards(snapshots,options,{now=Date.now(),budget=64}={}) 
  return (options.company&&normalizeCompany(b.company||b.observedEmployer||b.id)===normalizeCompany(options.company)?10000:0)+Math.min(age,365)*10+(history?.matches||0)*decay*5+(b.successfulCollections?2:0)+(b.recentPostingCount||0)*0.1;
  };
  const compare=(a,b)=>priority(b)-priority(a)||boardKey(a.board).localeCompare(boardKey(b.board));
- const unexplored=snapshots.filter(s=>!s.board.lastJobFetchAt).sort((a,b)=>boardKey(a.board).localeCompare(boardKey(b.board)));
+ const cooling=item=>Date.parse(item.board.retryAt)>now;
+ const eligible=snapshots.filter(item=>!cooling(item));
+ const unexplored=eligible.filter(s=>!s.board.lastJobFetchAt).sort((a,b)=>boardKey(a.board).localeCompare(boardKey(b.board)));
  const reserve=unexplored.slice(0,Math.ceil(budget*.25)),reserved=new Set(reserve);
- return [...reserve,...snapshots.filter(s=>!reserved.has(s)).sort(compare)];
+ return [...reserve,...eligible.filter(s=>!reserved.has(s)).sort(compare),...snapshots.filter(cooling).sort(compare)];
 }
 export function observeBoard(board,options,matches,now) {
  const queryStats={...(board.queryStats||{}),[boardQueryKey(options)]:{matches,at:new Date(now).toISOString()}};

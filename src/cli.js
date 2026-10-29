@@ -1,4 +1,4 @@
-import {pipelineSummary} from './pipeline-metrics.js';
+import {pipelineSummary,cacheDiagnostics} from './pipeline-metrics.js';
 import {PARSER_VERSION,JOB_SCHEMA_VERSION} from './schema.js';
 import {Command} from 'commander';
 import {normalizeOptions, normalizeCompany, validateOutputOptions, normalizeWebsites} from './filters.js';
@@ -81,8 +81,9 @@ export async function runCli(argv = process.argv) {
       await emit(content, options.output);
       if (options.output) eprint(`Wrote ${jobs.length} jobs to ${options.output}`);
       eprint(pipelineSummary(stats));
+      cacheDiagnostics(stats,jobs.length).forEach(eprint);
       if (stats.exactCacheHits) eprint(`Reused cached search results for ${stats.exactCacheHits} provider(s).`);
-      eprint(`Scanned ${stats.cardsSeen} cards across ${stats.pages} page(s) on ${options.websites.join(', ')}; ${jobs.length} accepted, ${stats.rejected} excluded.`);
+      eprint(`Scanned ${stats.cardsSeen} cards across ${stats.pages} page(s) on ${options.websites.join(', ')}; ${jobs.length} returned (result limit ${options.limit}), ${stats.rejected} excluded.`);
       for (const issue of stats.errors.slice(0,8)) eprint(`WARNING: ${issue}`);
       if (stats.errors.length > 8) eprint(`WARNING: ${stats.errors.length - 8} additional provider/board issues; coverage is partial.`);
       if (stats.facetReliant.length) {

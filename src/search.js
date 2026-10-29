@@ -7,7 +7,7 @@ import {createApiClient} from './api-http.js';
 import {consolidateJobs} from './dedup.js';
 export {fetchJob, findLinkedInJobs} from './linkedin.js';
 
-/** Execute selected providers concurrently; preserve selection order when interleaving. */
+/** Execute providers concurrently, then consolidate and globally rank candidates. */
 export async function findJobs(options, http, context = {}) {
   const metrics = new PipelineMetrics();
   const providerJobs = [], allErrors = [];
@@ -34,8 +34,9 @@ export async function findJobs(options, http, context = {}) {
     } catch (error) {context.report?.(site,error.name === 'AbortError' ? 'canceled' : 'provider failed');return {site,error};}
   }));
   await collection?.cache.flush();
-  if (collection?.cache.prune && !context.signal?.aborted) {
-    try {await collection.cache.prune();} catch (error) {context.report?.('Cache',`pruning deferred: ${error.message}`);}
+  const allExact=outcomes.filter(item=>item.outcome).length>0 && outcomes.every(item=>!item.outcome || item.outcome.stats.exactCacheHit);
+  if (collection?.cache.pruneIfDue && !allExact && !context.signal?.aborted) {
+    try {await collection.cache.pruneIfDue();} catch (error) {context.report?.('Cache',`pruning deferred: ${error.message}`);}
   }
   context.signal?.throwIfAborted();
   for (const {site,outcome,error} of outcomes) {
@@ -57,8 +58,10 @@ export async function findJobs(options, http, context = {}) {
   stats.exactCacheHits = outcomes.filter(item => item.outcome?.stats.exactCacheHit).length;
   stats.duplicatesRemoved = duplicateHints.confirmed + outcomes.reduce((sum,item) => sum + (item.outcome?.stats.duplicatesRemoved || 0),0);
   metrics.add('sourcesAttempted',selected.length);metrics.add('sourcesSuccessful',successfulProviders);
-  for (const key of ['boardsKnown','boardsVisited','boardsSkipped','boardsRefreshed','boardsBlocked','cacheHits','completePostings','incompletePostings','schemaRejected','resolutionAttempts','resolutionSuccesses']) metrics.add(key,outcomes.reduce((sum,item)=>sum+(item.outcome?.stats[key]||0),0));
+  for (const key of ['boardsKnown','boardsVisited','boardsSkipped','boardsRefreshed','boardsBlocked','staleBoards','cacheHits','postingSnapshotHits','exactCacheMisses','bulkAttempts','bulkSuccesses','bulkFailures','bulkCooldownHits','detailRequests','detailCacheHits','detailCooldownHits','acceptedAfterFiltering','completePostings','incompletePostings','schemaRejected','resolutionAttempts','resolutionSuccesses']) metrics.add(key,outcomes.reduce((sum,item)=>sum+(item.outcome?.stats[key]||0),0));
   if (collection?.http?.metrics) {metrics.add('httpRequests',collection.http.metrics.requests-(initialTransport.requests||0));metrics.add('httpBytes',collection.http.metrics.bytes-(initialTransport.bytes||0));}
+  metrics.add('exactCacheHits',stats.exactCacheHits);metrics.add('inventoryCacheHits',outcomes.filter(item=>item.outcome?.stats.inventoryCacheHit).length);
+  stats.timings=Object.fromEntries(['discoveryMs','collectionMs','enrichmentMs','filteringMs','cacheReadMs','cacheWriteMs'].map(key=>[key,outcomes.reduce((sum,item)=>sum+(item.outcome?.stats.timings?.[key]||0),0)]));
   stats.metrics=metrics.snapshot();
   return {jobs:rankJobs(duplicateHints.jobs,options,{now:context.now?.() ?? Date.now()}).slice(0,options.limit),stats};
 }

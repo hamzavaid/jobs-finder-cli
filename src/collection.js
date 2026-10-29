@@ -52,7 +52,7 @@ export class CollectionManager {
     const stats={...exact.data.stats,coverage,pages:0,cardsSeen:0,detailRequests:0,rejected:0,unknownExcluded:0,
       boardsVisited:0,boardsRefreshed:0,postingSnapshotHits:0,completePostings:0,incompletePostings:0,
       bulkAttempts:0,bulkSuccesses:0,bulkFailures:0,detailCacheHits:0,acceptedAfterFiltering:0,
-      cacheHits:exact.data.refs.length,inventoryCacheHit:true,exactCacheHit:true,exactCacheMisses:0,
+      cacheHits:exact.data.refs.length,inventoryCacheHit:true,exactCacheHit:true,exactCacheMisses:0,exactCacheMissReason:null,boardsScheduled:0,refreshedBoardKeys:[],skippedBoardKeys:[],
       timings:{discoveryMs:0,collectionMs:0,enrichmentMs:0,filteringMs:0}};
     this.report(provider.name,'exact-search cache hit');
     return {key,inventory,outcome:{jobs:exact.data.jobs,stats}};
@@ -85,9 +85,11 @@ export class CollectionManager {
     let snapshots = boards.map(board => ({board,key:`${provider.name}:${boardKey(board)}${provider.searchScoped ? ":query:"+stableKey(normalizeText(options.search)) : ""}`}));
     // Read large posting shards only inside the two-worker loop, never all at once.
     snapshots = scheduleBoards(snapshots,options,{now:this.now(),budget:this.maxBoards});
-    stats.boardsScheduled = Math.min(this.maxBoards,boards.length);
+    stats.boardsScheduled = Date.parse(inventory.providerRetryAt)>this.now()?0:Math.min(this.maxBoards,boards.filter(board=>!(Date.parse(board.retryAt)>this.now())).length);
+    stats.refreshedBoardKeys=[];stats.skippedBoardKeys=[];
     let refreshes = 0,providerBlocked = Date.parse(inventory.providerRetryAt) > this.now();
     this.report(provider.name,`fetching jobs: 0 / ${boards.length} boards`);
+    const collectionStarted=performance.now();
     await mapConcurrent(snapshots,2,async ({board,key:boardCacheKey}) => {
       const collect = async (cacheOnly = false) => {
       let cached = await this.cache.read('postings',boardCacheKey);
@@ -98,10 +100,10 @@ export class CollectionManager {
       const fresh = this.cache.fresh(cached) && cached.data.parserVersion === PARSER_VERSION && (!contentNeeded || cached.data.content) && (cached.data.complete || (cached.data.pages || 0) >= options.pages);
       if (fresh) {stats.cacheHits++;stats.postingSnapshotHits++;}
       else if (cacheOnly || providerBlocked || refreshes >= this.maxBoards || (board.retryAt && Date.parse(board.retryAt) > this.now())) {
-        if (!cached || !this.cache.usableStale(cached)) return;
+        if (!cached || !this.cache.usableStale(cached)) {stats.skippedBoardKeys.push(boardKey(board));return;}
         stats.staleBoards++;
       } else {
-        refreshes++;
+        refreshes++;stats.refreshedBoardKeys.push(boardKey(board));
         try {
           if (options.company && provider.fetchCompany && !board.company) board.company = await provider.fetchCompany(board,this.http);
           const outcome = await provider.fetchBoard(board,this.http,{pages:options.pages,content:contentNeeded,cache:this.cache,signal:this.signal,search:options.search});
@@ -233,6 +235,7 @@ export class CollectionManager {
       };
       if (this.cache.coordinateRefresh) await this.cache.coordinateRefresh(boardCacheKey,collect,() => stats.errors.push(`${provider.name}: board refresh active in another process; using available cache.`));else await collect();
     },{signal:this.signal});
+    stats.timings.collectionMs=performance.now()-collectionStarted;
     if (stats.incompleteEvidence) stats.errors.push(`${provider.name}: ${stats.incompleteEvidence} postings lacked complete keyword evidence; coverage is partial.`);
     stats.boardsRefreshed = refreshes;stats.boardsSkipped = boards.length-stats.boardsVisited;stats.boardsBlocked = providerBlocked ? stats.boardsSkipped : 0;
     if (stats.detailRequests >= this.maxEnrichments) stats.errors.push(`${provider.name}: detail request budget reached; unmatched unknown attributes remain excluded.`);
@@ -245,7 +248,7 @@ export class CollectionManager {
     if (!stats.boardsVisited) throw new Error(`${provider.name}: no board data could be collected. ${stats.errors.slice(0,3).join(' | ')}`);
     this.report(provider.name,'filtering and deduplicating');
     const jobs = engine.sort([...results.values()]).slice(0,options.limit);
-    stats.coverage={complete:stats.complete,boardsKnown:stats.boardsKnown,boardsVisited:stats.boardsVisited,boardsSkipped:stats.boardsSkipped,staleBoards:stats.staleBoards,partialBoards:stats.partialBoards};
+    stats.coverage={complete:stats.complete,boardsKnown:stats.boardsKnown,boardsVisited:stats.boardsVisited,boardsSkipped:stats.boardsSkipped,staleBoards:stats.staleBoards,partialBoards:stats.partialBoards,acceptedAfterFiltering:stats.acceptedAfterFiltering,refreshedBoardKeys:stats.refreshedBoardKeys,skippedBoardKeys:stats.skippedBoardKeys};
     if (!options.dateSeconds) {
       const changed = new Map(changes.map(board => [boardKey(board),board]));
       const ttl = Math.max(0,Math.min(stats.complete ? CACHE_TTL.search : CACHE_TTL.partialSearch,...refs.map(ref=>Date.parse(ref.validUntil)-this.now()),...jobs.map(job => job.expiresAt ? Date.parse(job.expiresAt)-this.now() : CACHE_TTL.search),...jobs.map(job => (Date.parse(job.cacheFetchedAt) || this.now()) + (job.cacheStatus === 'stale' ? CACHE_TTL.stale : sourceTtl) - this.now())));

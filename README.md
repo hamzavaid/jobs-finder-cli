@@ -107,22 +107,22 @@ root with `JOBS_CACHE_DIR`; this is optional.
 | Argument | Default | Meaning |
 | --- | --- | --- |
 | `--website <sites...>` | all ten enabled sources | Select any supported providers |
-| `--search <keywords>` | none | Provider query on HTML sites; local token-aware matching over title and available description on ATS/feed sources |
+| `--search <keywords>` | none | Provider retrieval plus local token/phrase evidence; HTML matching includes observed employer/location as well as title/description; ATS/feed matching uses title/description |
 | `--company <name>` | none | Normalized equality, ignoring common legal suffixes and punctuation |
-| `--location <place>` | none | Server query on LinkedIn/Indeed; local case-insensitive substring on Glassdoor/ATS locations |
+| `--location <place>` | none | Server hint where available, then local contiguous-word matching over observed primary/secondary locations; no geocoding |
 | `--date <duration>` | none | Integer `Nh`, `Nd`, `Nw`; 1 hour through 365 days; `1d` is past 24 hours |
 | `--remote <boolean>` | any | `true`: remote only; `false`: hybrid or on-site |
 | `--workplace <type>` | any | `remote`, `hybrid`, `onsite` (`on-site` alias); conflicts with `--remote` |
 | `--experience <level>` | any | `internship`, `entry`, `associate`, `senior`, `director`, `executive`; aliases `intern`, `entry-level`, `junior`, `mid`, `mid-senior` |
 | `--employment <type>` | any | `full-time`, `part-time`, `contract`, `temporary`, `internship`, `volunteer`, `other`; aliases `fulltime`, `parttime`, `intern` |
-| `--under <boolean>` | any | Fewer than 10 applicants (`true`) or at least 10 (`false`); unknown is excluded unless a supported true facet applies |
+| `--under <boolean>` | any | Fewer than 10 applicants (`true`) or at least 10 (`false`); unknown is always excluded |
 | `--verified <boolean>` | any | Explicit job verification; unknown does not mean false |
 | `--limit <n>` | `25` | Combined result cap, integer 1–200; not a promised minimum |
 | `--pages <n>` | `5` | Page cap per paginated board/provider, integer 1–20; does not set the company-discovery batch size |
 | `--delay <ms>` | `1200` | Minimum request-start spacing, integer 750–30000; archive services can impose larger minimums |
 | `--sort <order>` | `recent` | `recent` or `relevant`; global date-first or relevance-first ranking, with stable tie-breaking |
 | `--details` | off | Enrich candidates; request full Greenhouse descriptions |
-| `--strict` | off | Require reliable evidence for requested filters; exclude unconfirmed server-facet matches |
+| `--strict` | off | Require metadata for experience instead of title-only evidence; unknown server facets are excluded in both modes |
 | `--save` | off | Upsert accepted jobs into the local saved-job store |
 | `--format <type>` | `table` | `table`, `json`, `jsonl`, `csv` |
 | `-o, --output <file>` | stdout | Write output and create missing parent folders |
@@ -152,21 +152,30 @@ optional field. It does not guarantee that a vacancy remains open after a cached
 | Himalayas | Anonymous keyword search with page pagination, or cursor feed for company/location-only searches; daily freshness. Page limits leave coverage partial; location restrictions and explicit expiry are retained. Application links remain unchanged. |
 | Remotive | Public remote feed, six-hour minimum normal refresh, source-attributed URLs; jobs are delayed by the source. Timestamps without timezone remain unknown. |
 | GitHub (optional) | Application cells from two known public list formats supply leads, with no bundled employers. At most eight posting resolutions per batch; snippets and unresolved links are excluded with partial diagnostics. Employer pages require permitted public JSON-LD or scoped microdata, and robots permission. |
-| All ATS/feed sources | Filters are local. Applicant counts and verification are unsupported/unknown and do not produce matches. Seniority requires explicit metadata, never a title guess. Location matching includes available secondary locations but is not geocoding or radius search. |
-| LinkedIn | Some URL facets are accepted without observable evidence in normal mode; `--strict` excludes them. Applicant lower bounds are not exact counts. |
+| All ATS/feed sources | Filters are local. Applicant counts and verification are unsupported/unknown and do not produce matches. Experience may use labeled high-confidence title evidence in normal mode; strict mode requires metadata. Location matching includes available secondary locations but is not geocoding or radius search. |
+| LinkedIn | Company and entry/internship terms improve keyword retrieval; URL facets remain unverified hints. Required missing fields trigger bounded details; unknowns are excluded. Applicant lower bounds are not exact counts. |
 | Indeed | Public HTML collection checks robots rules first. HTTP blocks stop requests and create a cooldown. Date buckets and other URL filters are hints; observed local evidence is required. |
 | Glassdoor | Automated collection is restricted by default under the current provider terms; stderr supplies a browser-search link. Parsers remain fixture-tested for permitted use. No internal API or access workaround is used. |
 
 Employer display names use source metadata where available. Where an ATS exposes
-only its board label, `companyEvidence` is `board-identifier`; strict company filtering
+only its board label, `companyEvidence` is `board-identifier`; company filtering
 does not treat that inferred label as a verified employer name. ATS salary objects
 and HTML salary labels retain their source representation. Structured currencies/periods are kept only where valid;
 raw labels are not converted into comparable annual amounts.
 
-HTML results relying on a supported but unobserved facet have
-`linkedin-facet-unconfirmed` or `indeed-facet-unconfirmed` evidence and an
-`unconfirmedFilters` list. Observed contradictions always exclude a posting.
+Unobserved server facets never qualify results. A normal-mode experience match
+may use a clear Junior/Entry Level/Intern/Senior/Director title, labeled with
+`filterEvidence: "title-supplemented"` and `inferredFilters`. This does not populate
+missing employer seniority metadata. Staff/Principal titles reject entry searches
+but alone do not prove a specific seniority tier. Conflicting title and employer
+metadata are excluded rather than silently resolved. `--strict` requires metadata.
 Calendar dates are evaluated conservatively when time/timezone are missing.
+
+For example, LinkedIn `--search "Software Engineer" --company TikTok` now includes
+TikTok as a retrieval hint and verifies the observed employer locally. `--experience entry`
+adds an entry-level hint, rejects explicit Senior/Staff/Principal titles, and selectively
+resolves unknown metadata. No fallback search is added. See the
+[filter audit and measured regression results](docs/FILTER_ACCURACY.md).
 
 Searches combine bounded candidate pools from every selected provider, consolidate
 strong duplicate identities, rank globally, and then apply the total limit. With

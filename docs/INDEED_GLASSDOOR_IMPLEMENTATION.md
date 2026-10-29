@@ -1,5 +1,9 @@
 # Indeed and Glassdoor provider pipeline
 
+Subsequent filter semantics, title evidence, keyword validation and versioned cache
+updates are recorded in [FILTER_ACCURACY.md](FILTER_ACCURACY.md). Its rules supersede
+the filtering details and historical test totals in this implementation-stage report.
+
 Implemented against the supplied [specification](INDEED_GLASSDOOR_TECHNICAL_PIPELINE.md).
 See [access assessment](PROVIDER_ACCESS.md) and [baseline audit](INDEED_GLASSDOOR_AUDIT.md).
 No API keys, accounts, paid services, proxies or new dependencies are required.

@@ -23,3 +23,6 @@ Added public posting resolver, JSON-LD and scoped microdata parsing, safe canoni
 
 ## Phase 7 - normalized contract
 Versioned job schema and parser revision, identity validation, source/provenance defaults, conservative timestamp validation, salary currency/period checks, richer description states and read-time saved-record normalization added. ATS adapters quarantine malformed individual rows and mark affected snapshots partial. Parser revisions invalidate posting freshness and exact query keys. Full run exposed one remaining Greenhouse fail-whole-response branch; corrected and regression-tested. Eight focused schema/adapter/store tests passed (full-suite rerun follows).
+
+## Phase 8 - tiered identities
+Hash-indexed exact provider/tenant/region IDs, verified employer plus requisition IDs, and compatible observed-employer canonical posting URLs consolidate before global limits. Original source records and all provenance remain attached. Conflicting employers/requisitions stay separate; high-similarity description buckets supply possibleDuplicateOf hints only. Candidate similarity buckets cap at 20 records. Nine focused dedup/recovery/search tests passed.

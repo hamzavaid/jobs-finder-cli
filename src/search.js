@@ -3,7 +3,7 @@ import {providers} from './providers.js';
 import {searchProvider} from './provider-search.js';
 import {CollectionManager} from './collection.js';
 import {createApiClient} from './api-http.js';
-import {identifyCrossSourceDuplicates} from './dedup.js';
+import {consolidateJobs} from './dedup.js';
 export {fetchJob, findLinkedInJobs} from './linkedin.js';
 
 /** Execute selected providers concurrently; preserve selection order when interleaving. */
@@ -49,9 +49,9 @@ export async function findJobs(options, http, context = {}) {
   }
   if (!successfulProviders) throw new AggregateError(allErrors, `All selected sites failed: ${stats.errors.join(' | ')}`);
   const merged = providerJobs.flatMap(provider => provider.jobs);
-  const duplicateHints = identifyCrossSourceDuplicates(merged);
-  stats.possibleCrossSourceDuplicates = duplicateHints.possible;
+  const duplicateHints = consolidateJobs(merged);
+  stats.possibleCrossSourceDuplicates = duplicateHints.possible;stats.identityConflicts = duplicateHints.conflicts;
   stats.exactCacheHits = outcomes.filter(item => item.outcome?.stats.exactCacheHit).length;
-  stats.duplicatesRemoved = outcomes.reduce((sum,item) => sum + (item.outcome?.stats.duplicatesRemoved || 0),0);
+  stats.duplicatesRemoved = duplicateHints.confirmed + outcomes.reduce((sum,item) => sum + (item.outcome?.stats.duplicatesRemoved || 0),0);
   return {jobs:rankJobs(duplicateHints.jobs,options,{now:context.now?.() ?? Date.now()}).slice(0,options.limit),stats};
 }

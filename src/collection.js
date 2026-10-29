@@ -51,7 +51,7 @@ export class CollectionManager {
     const coverage=exact.data.coverage;
     const stats={...exact.data.stats,coverage,pages:0,cardsSeen:0,detailRequests:0,rejected:0,unknownExcluded:0,
       boardsVisited:0,boardsRefreshed:0,postingSnapshotHits:0,completePostings:0,incompletePostings:0,
-      bulkAttempts:0,bulkSuccesses:0,bulkFailures:0,detailCacheHits:0,acceptedAfterFiltering:0,
+      bulkAttempts:0,bulkSuccesses:0,bulkFailures:0,bulkCooldownHits:0,detailCacheHits:0,detailCooldownHits:0,exploratoryDetails:0,failedBoards:0,acceptedAfterFiltering:0,
       cacheHits:exact.data.refs.length,inventoryCacheHit:true,exactCacheHit:true,exactCacheMisses:0,exactCacheMissReason:null,boardsScheduled:0,refreshedBoardKeys:[],skippedBoardKeys:[],
       timings:{discoveryMs:0,collectionMs:0,enrichmentMs:0,filteringMs:0}};
     this.report(provider.name,'exact-search cache hit');
@@ -144,7 +144,7 @@ export class CollectionManager {
       let planned=record.data.jobs.map(job=>{const decision=engine.evaluate(job);return {job,decision,priority:enrichmentPriority(job,decision,options)};});
       const unresolved=planned.filter(item=>item.priority>=0 && item.decision.needsEnrichment);
       const plausible=unresolved.filter(item=>item.decision.matchedTerms.length || item.decision.unknowns.length || options.details);
-      if (provider.name==='Greenhouse' && plausible.length>3 && !providerBlocked && retryDue(enrichment.bulk,this.now()) && stats.bulkAttempts<this.maxBulkEnrichments) {
+      if (provider.name==='Greenhouse' && plausible.length>3 && !cacheOnly && !providerBlocked && retryDue(enrichment.bulk,this.now()) && stats.bulkAttempts<this.maxBulkEnrichments) {
         const started=performance.now();stats.bulkAttempts++;
         try {
           const bulk=await provider.fetchBoard(board,this.http,{content:true,pages:options.pages});
@@ -181,7 +181,7 @@ export class CollectionManager {
         const priority=enrichmentPriority(job,initial,options);
         const needed=needsContent || needsMetadata;
         if(provider.enrichJob && job.descriptionCompleteness==='complete')stats.detailCacheHits++;
-        if(provider.enrichJob && needed && priority>=0 && !providerBlocked) {
+        if(provider.enrichJob && needed && priority>=0 && !cacheOnly && !providerBlocked) {
           if(!retryDue(attempt,this.now()))stats.detailCooldownHits++;
           else if(stats.detailRequests<this.maxEnrichments) {
             // Preserve a small exploration budget for zero-overlap metadata rather

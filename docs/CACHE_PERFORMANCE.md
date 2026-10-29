@@ -45,3 +45,64 @@ Comparison against baseline commit 8427828 in an isolated ignored source copy:
 | Results returned per execution | 25 | 25 |
 
 A separate focused test measured a 575 ms warm execution with zero requests. No timing threshold is asserted in CI; heavy parallel test load can exceed one second. The fixed cold fixture uses all 40 individual slots plus eight bulk slots; the baseline consumed the shared budget with nine bulk and 31 individual calls. That accounts for eight additional bounded cold requests; timeout, HTTP size limits, concurrency and board-refresh budget were not increased. The optimization is eliminating repeated work, not reducing every cold search's request count.
+## Cache policy reference
+
+All durations are centralized in `CACHE_TTL` in `src/cache.js`.
+
+| Policy | Duration / behavior |
+| --- | --- |
+| Complete, fresh exact results | At most 10 minutes |
+| Partial coverage or usable stale exact results | At most 3 minutes |
+| ATS board freshness | 20 minutes (existing source-specific feed TTLs remain) |
+| Authorized stale retention | At most 7 days from the successful source observation; writing a search or retry record does not restart this window |
+| Transient enrichment failure | 5-minute default; a supplied source retry deadline is honored |
+| Oversized / unsupported / structural enrichment failure | 24-hour default, bounded rather than permanent |
+| Maintenance | At most once daily on collection searches; never scans during an exact-hit search |
+
+Exact TTL is also capped by each reference's original authorization boundary, each returned job's freshness/stale-retention boundary, and explicit posting expiry. A result originally using fresh snapshots cannot silently remain labeled fresh after those snapshots expire. A reference originally authorized stale may remain expired in the freshness sense, but only until its recorded stale deadline. Stale returned rows retain original `lastObservedAt`, `cacheFetchedAt`, `cacheStatus`, and provenance.
+
+Invalidation checks: normalized semantic arguments and selected providers; parser and search-policy versions; eligible inventory identity/status fingerprint; exact envelope expiration; referenced semantic revisions; snapshot file identity; original reference authorization; current source stale deadline; explicit posting expiry. Missing, corrupt, pending replacement or incompatible records miss conservatively. Inventory observation timestamps, query statistics, refresh timestamps and random inventory revisions alone do not invalidate membership. Retry metadata and query-planning row order do not change posting content revisions. Rolling `--date` queries intentionally bypass exact results and re-evaluate their boundaries through collection.
+
+Normal manifest hits use small JSON metadata and file-stat identity (size, mtime, ctime, inode), with zero full posting-shard parses. This is local consistency validation, not a cryptographic defense against a hostile actor rewriting cache contents and filesystem metadata. Corruption recovery remains automatic. Legacy unstamped manifests validate their snapshots once and upgrade conservatively; the first search after upgrading the cache policy is therefore not guaranteed to be warm.
+
+Persisted enrichment state lives inside each existing posting snapshot as `enrichment.bulk` and `enrichment.details[providerJobId]`; the enclosing provider/tenant/region key qualifies the posting ID. Attempts retain status, failure kind, attempt/success times and retry deadline. Successful content remains in normalized job rows. Metadata-only updates can write a shard to preserve a failure, but cannot extend its source observation timestamp. No additional service or database is introduced.
+
+Diagnostics explicitly distinguish exact hits/miss reasons, persisted inventory reuse, posting reuse, prior stale coverage, current board refreshes, bulk outcomes, individual attempts/reuse/cooldowns, API/index HTTP requests, jobs returned and postings passing local filtering. Timing fields record discovery, collection, enrichment, filtering, cache reads and cache writes. Collection time includes its worker work; enrichment and filesystem times can overlap and must not be summed as independent elapsed stages. Shared filesystem counters are aggregated once across providers. No-network warm hits reset work counters and report historical coverage separately.
+
+## Final review and verification
+
+Additional review regressions confirm:
+
+- Exact hits parse no posting snapshots and keep complete-result TTL at ten minutes.
+- Mismatched source timestamps cannot extend manifest freshness.
+- Partial-cache expiry resumes a different bounded refresh batch, while valid repeats do not.
+- Board-lock contention may use stale records but cannot start duplicate enrichment.
+- Immutable old snapshot files with currently observed manifests survive pruning.
+- Shared cache IO time is not double-counted across concurrent providers.
+
+All original provider, saved-job, export, filtering, cancellation and CLI tests remain in the suite. Clean installation and recursive syntax lint succeeded; npm audit reported zero vulnerabilities. The repository's existing offline CI automatically includes the new regressions; hosted GitHub Actions was not run locally.
+
+### Modified files and milestone commits
+
+| Area | Files |
+| --- | --- |
+| Exact lookup, bounded partial reuse, retry planning | `src/collection.js` |
+| Snapshot identity, coordinated writes, stale policy, daily pruning | `src/cache.js` |
+| Persistent retry helpers, richer-field reuse, oversized error classification | `src/enrichment.js`, `src/api-http.js` |
+| Scheduling and search aggregation | `src/board-scheduler.js`, `src/search.js` |
+| Diagnostics | `src/pipeline-metrics.js`, `src/cli.js` |
+| Reproducible measurements | `scripts/cache-performance.js`, `test/helpers/cache-performance-fixture.js`, `package.json` |
+| Regression coverage | `test/cache-first.test.js`, `test/enrichment-retry.test.js`, `test/cache-maintenance.test.js`, `test/cache-performance.test.js`, `test/manifest-pruning.test.js`, `test/refresh-recovery.test.js`, `test/cache-metrics.test.js` |
+| User and technical docs | `README.md`, `docs/ATS_ARCHITECTURE.md`, `docs/CACHE_PERFORMANCE.md` |
+
+Verified milestones: `fb8e208` (baseline and intentionally failing reproductions), `d67eb5c` (cache-first and stale partial reuse), `21ebe71` (persistent enrichment cooldowns), `db6ed37` (maintenance, metrics and 130-board fixture), followed by the final review/documentation commit.
+
+## Remaining limitations
+
+- The under-one-second goal is measured on isolated fixture runs, not guaranteed for every disk, antivirus setup, Node startup, provider combination or machine. Parallel CI load can be slower. The invariant is zero network on a valid immediate repeat.
+- A changed query/filter, expired TTL, changed inventory membership/posting revision, missing/corrupt shard or parser-policy upgrade legitimately causes a miss. Rolling date searches re-evaluate rather than use exact results.
+- A cold miss may still be expensive and partial. Public archive failures, source restrictions and the 16 MiB safety limit remain; this fix does not claim complete platform coverage or bypass access restrictions.
+- A same-query cold follower waits within the existing two-second process-lock budget; if the owner has not finished, it reports busy rather than duplicating collection. Valid exact hits do not acquire that collection lock.
+- Unwritable caches or oversized exact-result files cannot guarantee persistent reuse; optional cache failures remain visible. No external credentials, setup commands, daemon, paid service or database server are required.
+
+Final verification after all review fixes: 166 tests passed, zero failed/skipped, on Windows Node 20.20.2, 22.23.4, 24.22.1 and 25.2.1. npm ci, npm run lint, npm test, npm audit (zero vulnerabilities), local documentation-link validation and git diff --check succeeded. The test count includes the Node test runner's helper-file entry; all original regressions remain intact. No runtime dependencies, public CLI flags, credentials or setup commands were added. All milestone commits remain local and have not been pushed.

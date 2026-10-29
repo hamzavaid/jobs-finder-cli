@@ -19,6 +19,7 @@ export async function findJobs(options, http, context = {}) {
     collection = context.collection || new CollectionManager({...context,http:context.apiHttp || createApiClient({signal:context.signal,delayMs:options.delay,scheduler:http?.scheduler})});
   }
   const initialTransport = {...collection?.http?.metrics};
+  const initialCacheMetrics={...collection?.cache.metrics};
   const candidateOptions = {...options,limit:Math.min(1000,Math.max(100,options.limit * 4))};
   const selected = options.websites ?? Object.keys(providers);
   const outcomes = await Promise.all(selected.map(async site => {
@@ -62,6 +63,7 @@ export async function findJobs(options, http, context = {}) {
   if (collection?.http?.metrics) {metrics.add('httpRequests',collection.http.metrics.requests-(initialTransport.requests||0));metrics.add('httpBytes',collection.http.metrics.bytes-(initialTransport.bytes||0));}
   metrics.add('exactCacheHits',stats.exactCacheHits);metrics.add('inventoryCacheHits',outcomes.filter(item=>item.outcome?.stats.inventoryCacheHit).length);
   stats.timings=Object.fromEntries(['discoveryMs','collectionMs','enrichmentMs','filteringMs','cacheReadMs','cacheWriteMs'].map(key=>[key,outcomes.reduce((sum,item)=>sum+(item.outcome?.stats.timings?.[key]||0),0)]));
+  if(collection?.cache.metrics){stats.timings.cacheReadMs=collection.cache.metrics.readMs-(initialCacheMetrics.readMs||0);stats.timings.cacheWriteMs=collection.cache.metrics.writeMs-(initialCacheMetrics.writeMs||0);}
   stats.metrics=metrics.snapshot();
   return {jobs:rankJobs(duplicateHints.jobs,options,{now:context.now?.() ?? Date.now()}).slice(0,options.limit),stats};
 }

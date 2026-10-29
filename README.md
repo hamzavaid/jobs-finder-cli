@@ -68,13 +68,18 @@ warning means the CLI searched a subset, not every employer on that platform.**
 Unvisited companies and partial pages are not treated as closed jobs. Future searches
 continue automatic collection when cached results need refreshing.
 
+Identical repeated ATS/feed searches check their persisted result cache **before any
+network discovery, collection or enrichment**. Valid partial results are reusable
+too: their original coverage warnings and stale observation timestamps remain intact.
+A cache hit does not advance the board-refresh batch.
+
 Repeated searches reuse three independent cache layers:
 
 | Cache | Normal refresh behavior |
 | --- | --- |
 | Company boards | Full discovery due after 30 days; recent discovery daily; validation around every 7 days |
 | Board postings | ATS snapshots fresh for 20 minutes; Remotive six hours, Himalayas one day; only missing/stale or insufficient board snapshots are refreshed |
-| Identical searches | Up to 10 minutes, bounded by underlying posting freshness and revision checks |
+| Identical searches | Complete/fresh results up to 10 minutes; partial/stale results up to 3 minutes, bounded by snapshot retention, revisions and job expiry |
 
 Short batches can span multiple searches; discovery completion means the configured
 index pass finished, not that every employer worldwide was found. Failed discovery
@@ -85,8 +90,12 @@ than reuse potentially outdated exact results.
 
 Small revision manifests validate repeated searches without loading every posting
 snapshot. Unchanged collections renew freshness without rewriting large snapshots.
-Cross-process locks coordinate refreshes, and enriched descriptions survive lighter
-refreshes. Negative resolution outcomes expire automatically.
+Cross-process locks coordinate searches and board refreshes, and enriched descriptions
+survive lighter refreshes. Oversized Greenhouse bulk content gets a 24-hour cooldown;
+individual details can continue. Individual transient failures wait five minutes,
+structural/unsupported failures 24 hours. Bulk and detail budgets are separate.
+Negative resolution outcomes expire automatically. Pruning runs at most daily on
+collection searches; exact hits never scan cache directories.
 
 Caches live in the operating system's user cache directory, separate from saved
 jobs and the repository. Corrupt cache records recover automatically. Normal use
@@ -184,7 +193,10 @@ Conflicting employers or requisition IDs remain separate.
 Interactive terminals show a small changing status line for discovery, cache use,
 board collection, filtering, and completion. Known board totals appear in progress.
 Animation is disabled in CI and when either output stream is non-interactive.
-All progress/diagnostics use **stderr**; structured results use **stdout**:
+Diagnostics distinguish exact-cache hits/miss reasons, prior source coverage, stale
+boards, current refresh/enrichment work and API request counts. A returned result cap
+is reported separately from the number that passed filtering. All progress/diagnostics
+use **stderr**; structured results use **stdout**:
 
 ```bash
 jobs find --search "Accountant" --website Greenhouse Lever Ashby --format json > jobs.json
@@ -249,7 +261,11 @@ See [Himalayas terms and API](https://himalayas.app/api) and
 ## Troubleshooting
 
 - **First search is slow:** public indexes and large company boards take time.
-  Work is bounded and resumable; repeated searches reuse caches automatically.
+  Work is bounded and resumable; repeated searches reuse caches automatically. Identical
+  commands reuse partial/stale results for up to three minutes; a later cache miss
+  resumes collection.
+  Changed criteria, expired results, new inventory membership or changed posting/parser
+  revisions can require another collection. Rolling `--date` searches re-evaluate filters.
 - **Partial coverage:** discovery, page/request budgets, board failures, or stale
   fallback limited the dataset. Results are not a complete count of platform jobs.
 - **Archive outage:** known boards remain available; public-index fallbacks are
@@ -280,6 +296,7 @@ npm ci
 npm run lint
 npm test
 npm run benchmark
+npm run benchmark:cache
 npm audit
 ```
 
@@ -306,6 +323,13 @@ measurements. Its labels are synthetic/provisional and the fixture set is small.
 On the initial fixture run, recall rose from 0.75 to 1.00 and NDCG@10 from 0.731 to
 1.00; cold/warm mocked collection took about 67/7 ms with 3/0 requests. These are
 regression measurements, not live coverage or production latency guarantees.
+
+The cache regression benchmark uses 130 boards / 4,160 postings and separate Node
+processes. One isolated comparison reduced the repeated command from 104 mocked
+requests to zero and from 2,287 ms to 695 ms (including startup). Service delays are
+virtual; disk, parsing and process costs are real. CI checks request/correctness
+invariants rather than enforcing a machine-dependent subsecond timing threshold.
+See [cache policies, cooldowns and measured comparison](docs/CACHE_PERFORMANCE.md).
 
 Technical details: [pipeline improvements and limitations](docs/PIPELINE_IMPROVEMENTS.md), [architecture and cache schema](docs/ATS_ARCHITECTURE.md),
 [audit and phase log](docs/ATS_PIPELINE_AUDIT.md),

@@ -1,0 +1,4 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {findJobs} from '../src/search.js';import {normalizeOptions} from '../src/filters.js';
+test('shared filesystem timing is aggregated once across concurrent providers',async()=>{
+ const metrics={readMs:0,writeMs:0};const collection={cache:{metrics,flush:async()=>{}},find:async provider=>{metrics.readMs+=10;metrics.writeMs+=5;await new Promise(r=>setImmediate(r));return {jobs:[{source:provider.name,id:provider.name,title:'Chef'}],stats:{pages:1,cardsSeen:1,rejected:0,detailRequests:0,unknownExcluded:0,facetReliant:[],errors:[],timings:{cacheReadMs:20,cacheWriteMs:10}}};}};const result=await findJobs(normalizeOptions({search:'chef',website:['Greenhouse','Lever']}),null,{collection});assert.equal(result.stats.timings.cacheReadMs,20);assert.equal(result.stats.timings.cacheWriteMs,10);
+});

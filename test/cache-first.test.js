@@ -63,3 +63,21 @@ test('inventory fingerprints ignore refresh timestamps and observation statistic
  assert.equal(inventoryFingerprint({boards:[board]}),inventoryFingerprint({boards:[{...board,lastJobFetchAt:'changed',queryStats:{changed:true}}],revision:'different'}));
  assert.notEqual(inventoryFingerprint({boards:[board]}),inventoryFingerprint({boards:[board,{id:'new',status:'pending'}]}));
 });
+
+
+test('normal exact hits validate manifests without parsing posting snapshots',()=>seeded(async c=>{
+ await c.manager.find(greenhouseProvider,c.options);
+ const cache=new CacheManager({root:c.root,now:c.now});
+ const result=await new CollectionManager({cache,http:c.http,now:c.now}).find(greenhouseProvider,c.options);
+ assert.equal(result.stats.exactCacheHit,true);assert.equal(cache.metrics.postingReads,0);assert.equal(cache.metrics.manifestChecks,1);
+}));
+
+test('complete fresh searches keep ten-minute TTL and mismatched source timestamps cannot extend it',()=>seeded(async c=>{
+ await c.cache.update('inventory','Greenhouse',inventory=>({...inventory,coverageComplete:true,lastDiscoveryErrors:[]}));
+ const result=await c.manager.find(greenhouseProvider,c.options);assert.equal(result.stats.complete,true);
+ const record=await c.cache.read('search',searchCacheKey(c.options,'Greenhouse'));assert.equal(Date.parse(record.expiresAt)-c.now(),CACHE_TTL.search);
+ const manifest=await c.cache.read('manifest','Greenhouse:global:example');
+ await c.cache.put('manifest','Greenhouse:global:example',{...manifest.data,lastSuccessfulFetchAt:new Date(c.now()+1000).toISOString()},{ttl:CACHE_TTL.postings});
+ assert.equal(await c.cache.postingManifest('Greenhouse:global:example'),null);
+ const again=await c.manager.find(greenhouseProvider,c.options);assert.notEqual(again.stats.exactCacheHit,true);
+},{stale:false}));

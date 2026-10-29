@@ -154,8 +154,8 @@ optional field. It does not guarantee that a vacancy remains open after a cached
 | GitHub (optional) | Application cells from two known public list formats supply leads, with no bundled employers. At most eight posting resolutions per batch; snippets and unresolved links are excluded with partial diagnostics. Employer pages require permitted public JSON-LD or scoped microdata, and robots permission. |
 | All ATS/feed sources | Filters are local. Applicant counts and verification are unsupported/unknown and do not produce matches. Seniority requires explicit metadata, never a title guess. Location matching includes available secondary locations but is not geocoding or radius search. |
 | LinkedIn | Some URL facets are accepted without observable evidence in normal mode; `--strict` excludes them. Applicant lower bounds are not exact counts. |
-| Indeed | Public access may be blocked. Date URL buckets are coarse; non-equivalent durations require local evidence. Several workplace/experience/employment filters lack reliable equivalents. |
-| Glassdoor | Public access, detail routes and pagination can be restricted. No unverified server facets are claimed; unknown unsupported criteria exclude candidates. |
+| Indeed | Public HTML collection checks robots rules first. HTTP blocks stop requests and create a cooldown. Date buckets and other URL filters are hints; observed local evidence is required. |
+| Glassdoor | Automated collection is restricted by default under the current provider terms; stderr supplies a browser-search link. Parsers remain fixture-tested for permitted use. No internal API or access workaround is used. |
 
 Employer display names use source metadata where available. Where an ATS exposes
 only its board label, `companyEvidence` is `board-identifier`; strict company filtering
@@ -286,8 +286,19 @@ See [Himalayas terms and API](https://himalayas.app/api) and
 - **Saved-store error:** confirm `JOBS_DB`, directory permissions and JSON validity;
   requested saves fail explicitly rather than silently dropping data.
 
-LinkedIn live parsing was previously verified; Indeed and Glassdoor returned 403
-in the recorded checks. The original three ATS APIs were tested on 2026-10-27. On 2026-10-28, live adapters
+Indeed and Glassdoor use the existing `find` interface, with no extra setup. Successful
+HTML searches are cached for ten minutes (three minutes for partial coverage), and
+details and robots decisions for six hours. Repeated valid queries make no requests;
+rolling dates are checked again. Blocks have a separate cooldown, never a false empty
+result. Previously collected jobs may be shown for up to 24 hours after a failed refresh,
+explicitly marked stale. Unknown applicant counts and verification flags cannot match
+either true or false filters. See the [filter matrix and technical pipeline](docs/INDEED_GLASSDOOR_IMPLEMENTATION.md)
+and [access policy](docs/PROVIDER_ACCESS.md). Use `jobs url --search "Chef" --website Indeed Glassdoor`
+for browser-search links without making requests.
+
+LinkedIn live parsing was previously verified. On 2026-10-29, Indeed returned 403;
+Glassdoor was policy-restricted without requesting listings. No live success is claimed
+for either source. The original three ATS APIs were tested on 2026-10-27. On 2026-10-28, live adapters
 parsed SmartRecruiters (3 jobs), Himalayas (20, partial page budget), and Remotive
 (11); Personio returned valid empty XML. Optional GitHub resolution produced two
 complete postings from two leads, including a public employer page.
@@ -301,6 +312,7 @@ npm run lint
 npm test
 npm run benchmark
 npm run benchmark:cache
+npm run benchmark:html
 npm audit
 ```
 

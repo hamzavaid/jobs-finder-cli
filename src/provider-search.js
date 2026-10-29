@@ -31,7 +31,7 @@ export async function searchProvider(provider, options, http, onProgress = () =>
         let job = card;
         if (options.details || options.strict || (provider.name === 'LinkedIn' && (options.under != null || options.verified != null))) {
           stats.detailRequests++;
-          job = provider.parseDetail(await http.get(provider.detailUrl(card.id, card)), card);
+          try {job = provider.parseDetail(await http.get(provider.detailUrl(card.id, card)), card);} catch(error) {if (error.name === 'AbortError') throw error;stats.errors.push(`${provider.name}: incomplete detail ${card.id}: ${error.message}`);job = {...card,resolutionStatus:'incomplete'};}
         }
         const decision = evaluateJob(job, evaluation);
         if (!decision.match) {

@@ -17,3 +17,6 @@ Public GitHub job lists now supply dynamically extracted board candidates indepe
 
 ## Phase 5 - query-aware scheduling
 Added deterministic bounded board ordering, decayed prior match counts (seven-day exponential decay), company priority, age-based starvation protection and 25% exploration reservation. Up to eight query observations per board are persisted. Added scheduled/refreshed/skipped/blocked counters while retaining cancellation and source cooldowns. Thirteen focused scheduling/pipeline/recovery tests passed.
+
+## Phase 6 - posting resolution
+Added public posting resolver, JSON-LD and scoped microdata parsing, safe canonicalization, explicit five-state results, positive/negative resolution caches, robots checks, one-hop ATS routing, and optional GitHub source (eight posting resolutions per batch). Generic employer pages are resolved from discovered leads; there is no unrestricted crawler. HTTPS transport pins checked DNS answers at connection time, rejects private/reserved IPv4/IPv6 targets, credentials, redirects and oversized/time-limited bodies. List-only snippets never become postings. Generic HTML selectors are intentionally limited to Schema.org metadata rather than speculative universal layouts. Fourteen focused adapter/resolver/cache tests passed.

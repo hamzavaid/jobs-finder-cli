@@ -9,10 +9,10 @@ export const EMPLOYMENT = Object.freeze({
   contract: 'C', temporary: 'T', internship: 'I', intern: 'I',
   volunteer: 'V', other: 'O'
 });
-export const WEBSITES = Object.freeze({linkedin: 'LinkedIn', indeed: 'Indeed', glassdoor: 'Glassdoor', greenhouse:'Greenhouse',lever:'Lever',ashby:'Ashby',smartrecruiters:'SmartRecruiters',personio:'Personio',remotive:'Remotive',himalayas:'Himalayas'});
+export const WEBSITES = Object.freeze({linkedin: 'LinkedIn', indeed: 'Indeed', glassdoor: 'Glassdoor', greenhouse:'Greenhouse',lever:'Lever',ashby:'Ashby',smartrecruiters:'SmartRecruiters',personio:'Personio',remotive:'Remotive',himalayas:'Himalayas',github:'GitHub'});
 export function normalizeWebsites(values) {
   const tokens = (Array.isArray(values) ? values : values == null ? [] : [values]).flatMap(v => String(v).split(','));
-  if (!tokens.length) return Object.values(WEBSITES);
+  if (!tokens.length) return Object.values(WEBSITES).filter(site => site !== 'GitHub');
   const out = [];
   for (const token of tokens) {
     const key = token.trim().toLowerCase();

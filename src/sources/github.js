@@ -1,0 +1,8 @@
+import {extractPublicLinks} from '../employer-candidate.js';import {PostingResolver} from '../resolution.js';import {createPublicHttp} from '../public-http.js';
+export const githubProvider={name:'GitHub',kind:'feed',cacheTtl:6*3600000,async fetchBoard(board,http,{cache,signal,resolver,maxResolutions=8}={}){
+ if(!http.publicLists)throw new Error('GitHub public-list transport unavailable.');const lists=await http.publicLists();if(!lists.documents.length)throw new Error('GitHub public job lists unavailable.');
+ const resolve=resolver||new PostingResolver({apiHttp:http,cache,signal,http:createPublicHttp({signal})});const jobs=[],errors=[];let attempts=0;
+ const leads=[...new Set(lists.documents.flatMap(doc=>extractPublicLinks(doc.body,{base:doc.url})))].filter(url=>!['github.com','raw.githubusercontent.com','simplify.jobs','i.imgur.com','camo.githubusercontent.com'].includes(new URL(url).hostname));
+ for(const url of leads.slice(0,maxResolutions)){signal?.throwIfAborted();attempts++;const result=await resolve.resolve(url);if(result.status==='complete')jobs.push({...result.job,source:'GitHub',authoritativeSource:result.job.source,id:`${result.job.source}:${result.job.id}`,provenance:[...(result.job.provenance||[]),...lists.documents.map(doc=>({source:'GitHub',url:doc.url,method:'public-job-list'}))]});else errors.push(`${result.status}: ${result.error||'posting incomplete'}`);}
+ return {jobs,pages:lists.documents.length,complete:false,reason:`resolved ${jobs.length}/${attempts} leads; ${leads.length-attempts} unvisited; ${errors.length} incomplete or unavailable`,resolutionAttempts:attempts,resolutionSuccesses:jobs.length};
+}};

@@ -12,7 +12,7 @@ import {createApiClient} from './api-http.js';
 
 function addFilters(command) {
   return command
-    .option('--website <sites...>', 'LinkedIn Indeed Glassdoor Greenhouse Lever Ashby SmartRecruiters Personio Remotive Himalayas (one or more; default: all enabled providers)', (values, prev) => [...prev, ...(Array.isArray(values) ? values : [values])], [])
+    .option('--website <sites...>', 'LinkedIn Indeed Glassdoor Greenhouse Lever Ashby SmartRecruiters Personio Remotive Himalayas GitHub (optional) (one or more; default: all enabled providers)', (values, prev) => [...prev, ...(Array.isArray(values) ? values : [values])], [])
     .option('--search <keywords>', 'Free-form job keywords (ANY occupation, e.g. chef, accountant)')
     .option('--date <duration>', 'Posted within Nh/Nd/Nw, e.g. 1d = past 24 hours')
     .option('--company <name>', 'Company name (client-side exact-normalized match)')
@@ -109,7 +109,7 @@ export async function runCli(argv = process.argv) {
     .description('Show locally saved job results without making any web requests')
     .option('--search <text>', 'Search title/company/description/location')
     .option('--company <name>', 'Restrict to company')
-    .option('--website <sites...>', 'Filter saved sources: LinkedIn Indeed Glassdoor Greenhouse Lever Ashby SmartRecruiters Personio Remotive Himalayas', (values, prev) => [...prev, ...(Array.isArray(values) ? values : [values])], [])
+    .option('--website <sites...>', 'Filter saved sources: LinkedIn Indeed Glassdoor Greenhouse Lever Ashby SmartRecruiters Personio Remotive Himalayas GitHub (optional)', (values, prev) => [...prev, ...(Array.isArray(values) ? values : [values])], [])
     .option('--limit <number>', 'Maximum output rows'))
     .action(async options => {
       validateOutputOptions(options);
@@ -123,7 +123,7 @@ export async function runCli(argv = process.argv) {
     .option('--format <format>', 'json | jsonl | csv', 'csv')
     .option('--search <text>', 'Search title/company/description/location')
     .option('--company <name>', 'Restrict to company')
-    .option('--website <sites...>', 'Filter saved sources: LinkedIn Indeed Glassdoor Greenhouse Lever Ashby SmartRecruiters Personio Remotive Himalayas', (values, prev) => [...prev, ...(Array.isArray(values) ? values : [values])], [])
+    .option('--website <sites...>', 'Filter saved sources: LinkedIn Indeed Glassdoor Greenhouse Lever Ashby SmartRecruiters Personio Remotive Himalayas GitHub (optional)', (values, prev) => [...prev, ...(Array.isArray(values) ? values : [values])], [])
     .action(async options => {
       if (!['json', 'jsonl', 'csv'].includes(options.format)) throw new Error('Export format must be json, jsonl, or csv.');
       const jobs = filterSaved(await savedJobs(), options);
@@ -152,7 +152,7 @@ export async function runCli(argv = process.argv) {
     .description('Display runtime/store info; optionally probe selected public search pages')
     .option('--probe', 'Probe public pages/APIs; ATS board discovery is automatic and bounded')
     .option('--search <keywords>', 'Keywords for --probe', 'chef')
-    .option('--website <sites...>', 'LinkedIn Indeed Glassdoor Greenhouse Lever Ashby SmartRecruiters Personio Remotive Himalayas; default: all enabled providers', (values, prev) => [...prev, ...(Array.isArray(values) ? values : [values])], [])
+    .option('--website <sites...>', 'LinkedIn Indeed Glassdoor Greenhouse Lever Ashby SmartRecruiters Personio Remotive Himalayas GitHub (optional); default: all enabled providers', (values, prev) => [...prev, ...(Array.isArray(values) ? values : [values])], [])
     .action(async options => {
       const sites = normalizeWebsites(options.website);
       const info = {node:process.version, database:defaultDbPath(), saved:(await savedJobs()).length, websites:sites, onlineProbe:'skipped'};

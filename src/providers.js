@@ -1,6 +1,7 @@
 import {smartRecruitersProvider} from './ats/smartrecruiters.js';
 import {personioProvider} from './ats/personio.js';
 import {remotiveProvider,himalayasProvider} from './sources/feeds.js';
+import {githubProvider} from './sources/github.js';
 import {linkedinProvider} from './linkedin.js';
 import {indeedProvider} from './indeed.js';
 import {glassdoorProvider} from './glassdoor.js';
@@ -14,7 +15,7 @@ export class ProviderRegistry {
   get(name) {const provider = this.adapters.get(name);if (!provider) throw new Error(`Unknown provider: ${name}`);return provider;}
   list() {return [...this.adapters.values()];}
 }
-export const registry = new ProviderRegistry([linkedinProvider,indeedProvider,glassdoorProvider,greenhouseProvider,leverProvider,ashbyProvider,smartRecruitersProvider,personioProvider,remotiveProvider,himalayasProvider]);
+export const registry = new ProviderRegistry([linkedinProvider,indeedProvider,glassdoorProvider,greenhouseProvider,leverProvider,ashbyProvider,smartRecruitersProvider,personioProvider,remotiveProvider,himalayasProvider,githubProvider]);
 export const providers = Object.freeze(Object.fromEntries(registry.list().map(provider => [provider.name,provider])));
 export function postingProvider(input, website) {
   let detected;

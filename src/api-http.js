@@ -76,7 +76,7 @@ export function createApiClient({retries = 2,random = Math.random,fetchImpl = gl
             throw error;
           }
           if (method === 'HEAD') return {status:response.status,headers:response.headers};
-          if (Number(response.headers?.get?.('content-length')) > maxBytes) throw new AccessError(`${host}: response exceeds the safe size limit.`);
+          if (Number(response.headers?.get?.('content-length')) > maxBytes) throw Object.assign(new AccessError(`${host}: response exceeds the safe size limit.`),{code:'RESPONSE_TOO_LARGE'});
           let body;
           if (response.body?.getReader) {
             const reader = response.body.getReader(),chunks = [];let bytes = 0;
@@ -84,14 +84,14 @@ export function createApiClient({retries = 2,random = Math.random,fetchImpl = gl
               while (true) {
                 const part = await reader.read(); if (part.done) break;
                 bytes += part.value.byteLength;metrics.bytes += part.value.byteLength;
-                if (bytes > maxBytes) throw new AccessError(`${host}: response exceeds the safe size limit.`);
+                if (bytes > maxBytes) throw Object.assign(new AccessError(`${host}: response exceeds the safe size limit.`),{code:'RESPONSE_TOO_LARGE'});
                 chunks.push(part.value);
               }
               body = Buffer.concat(chunks).toString('utf8');
             } finally {await reader.cancel().catch(() => {});reader.releaseLock();}
           } else {
             body = await response.text();metrics.bytes += Buffer.byteLength(body);
-            if (Buffer.byteLength(body) > maxBytes) throw new AccessError(`${host}: response exceeds the safe size limit.`);
+            if (Buffer.byteLength(body) > maxBytes) throw Object.assign(new AccessError(`${host}: response exceeds the safe size limit.`),{code:'RESPONSE_TOO_LARGE'});
           }
           const etag=response.headers?.get?.('etag'),modified=response.headers?.get?.('last-modified');
           if (method === 'GET' && (etag || modified) && Buffer.byteLength(body) <= 2*1024*1024) {responseCache.delete(url.toString());responseCache.set(url.toString(),{body,etag,modified});if(responseCache.size>8)responseCache.delete(responseCache.keys().next().value);}

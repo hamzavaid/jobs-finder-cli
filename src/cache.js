@@ -5,7 +5,7 @@ import {createHash,randomUUID} from 'node:crypto';
 import {setTimeout as sleep} from 'node:timers/promises';
 import {validBoardId,publicLink} from './ats/shared.js';
 
-const DAY = 86400000, kinds = new Set(['inventory','postings','search','resolution']);
+const DAY = 86400000, kinds = new Set(['inventory','postings','search','resolution','manifest']);
 export const CACHE_TTL = Object.freeze({postings:20 * 60000,search:10 * 60000,stale:7 * DAY});
 export function defaultCacheDir(env = process.env,platform = process.platform,home = homedir()) {
   if (env.JOBS_CACHE_DIR) return env.JOBS_CACHE_DIR;
@@ -27,6 +27,7 @@ export function validCacheRecord(record,kind,key) {
   const data = record.data;
   if (!data || typeof data !== 'object') return false;
   if (kind !== 'inventory' && record.expiresAt === null) return false;
+  if (kind === 'manifest') return typeof data.revision === 'string' && typeof data.pending === 'boolean';
   if (kind === 'resolution') return ['complete','incomplete','blocked','unsupported','failed'].includes(data.status) && (data.job === null || data.job && typeof data.job.title === 'string' && !!publicLink(data.job.url));
   if (kind === 'inventory') return typeof data.provider === 'string' && data.cursors && typeof data.cursors === 'object' && !Array.isArray(data.cursors) && Array.isArray(data.boards) && data.boards.length <= 50000 && data.boards.every(board => board && validBoardId(board.id) && ['global','eu'].includes(board.region || 'global') && ['pending','valid','invalid'].includes(board.status));
   if (kind === 'postings') return validJobs(data.jobs) && typeof data.complete === 'boolean' && typeof data.revision === 'string' && validBoardId(data.board?.id);
@@ -54,7 +55,18 @@ export class CacheManager {
     } catch (error) {if (error.code === 'ENOENT') return null; throw error;}
   }
   async read(kind,key) {
-    try {return await this.rawRead(kind,key);}
+    try {
+      const record = await this.rawRead(kind,key);
+      if (record && kind === 'postings') {
+        const manifest = await this.rawRead('manifest',key).catch(() => null);
+        if (manifest && !manifest.data.pending && manifest.data.revision === record.data.revision) {
+          record.expiresAt = manifest.expiresAt;record.updatedAt = manifest.updatedAt;
+          record.data.lastSuccessfulFetchAt = manifest.data.lastSuccessfulFetchAt || record.data.lastSuccessfulFetchAt;
+          if (manifest.data.observedAt) record.data.jobs = record.data.jobs.map(job => ({...job,lastSeenAt:manifest.data.observedAt,lastObservedAt:manifest.data.observedAt}));
+        }
+      }
+      return record;
+    }
     catch (error) {
       if (['EACCES','EPERM','ENOTDIR'].includes(error.code)) {this.onWarning('Cache is unavailable; collecting without persisted cache data.');return null;}
       if (error.code && !['ENOENT'].includes(error.code)) throw error;
@@ -144,7 +156,25 @@ export class CacheManager {
     result.finally(() => {if (this.pending.get(queueKey) === result) this.pending.delete(queueKey);}).catch(() => {});
     return result;
   }
-  put(kind,key,data,options) {return this.update(kind,key,() => data,options);}
+  async put(kind,key,data,options = {}) {
+    if (kind !== 'postings') return this.update(kind,key,() => data,options);
+    const previous = await this.read(kind,key);
+    const manifest = {revision:data.revision,pending:true,parserVersion:data.parserVersion,lastSuccessfulFetchAt:data.lastSuccessfulFetchAt,observedAt:data.complete ? data.lastSuccessfulFetchAt : null};
+    await this.update('manifest',key,() => manifest,options);
+    const unchanged = previous?.data.revision === data.revision && previous.data.parserVersion === data.parserVersion && previous.data.complete === data.complete && previous.data.content === data.content && previous.data.pages === data.pages;
+    const record = unchanged ? {...previous,data,updatedAt:new Date(this.now()).toISOString(),expiresAt:new Date(this.now()+(options.ttl ?? CACHE_TTL.postings)).toISOString()} : await this.update(kind,key,() => data,options);
+    await this.update('manifest',key,() => ({...manifest,pending:false}),options);
+    return record;
+  }
+  async postingManifest(key) {
+    const manifest = await this.read('manifest',key);
+    if (manifest) return manifest.data.pending ? null : manifest;
+    return this.read('postings',key);
+  }
+  async coordinateRefresh(key,work,onBusy = () => {}) {
+    try {return await this.withLock('postings',key+':refresh',() => work(false));}
+    catch (error) {if (!/cache is busy in another process/.test(error.message)) throw error;onBusy();return work(true);}
+  }
   async flush() {await Promise.allSettled([...this.pending.values()]);}
   async prune() {
     // Shards are independent; pruning never removes inventories or live locks.
@@ -157,7 +187,7 @@ export class CacheManager {
         if (!/^[a-f0-9]{64}\.json(?:\.(?:corrupt|tmp)-[\w-]+)?$/.test(file)) continue;
         const path = join(directory,file), info = await stat(path).catch(() => null);
         if (!info || this.now() - info.mtimeMs < DAY) continue;
-        if (/\.(?:tmp|corrupt)-/.test(file) || (['search','resolution'].includes(kind) && this.now() - info.mtimeMs > DAY) || (kind === 'postings' && this.now() - info.mtimeMs > CACHE_TTL.stale)) {
+        if (/\.(?:tmp|corrupt)-/.test(file) || (['search','resolution'].includes(kind) && this.now() - info.mtimeMs > DAY) || (['postings','manifest'].includes(kind) && this.now() - info.mtimeMs > CACHE_TTL.stale)) {
           // Hold the writer's lock and recheck age to avoid deleting a fresh replacement.
           let lock;
           try {lock = await open(path + '.lock','wx',0o600);}

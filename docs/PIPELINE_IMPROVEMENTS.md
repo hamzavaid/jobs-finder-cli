@@ -26,3 +26,6 @@ Versioned job schema and parser revision, identity validation, source/provenance
 
 ## Phase 8 - tiered identities
 Hash-indexed exact provider/tenant/region IDs, verified employer plus requisition IDs, and compatible observed-employer canonical posting URLs consolidate before global limits. Original source records and all provenance remain attached. Conflicting employers/requisitions stay separate; high-similarity description buckets supply possibleDuplicateOf hints only. Candidate similarity buckets cap at 20 records. Nine focused dedup/recovery/search tests passed.
+
+## Phase 9 - cache coordination and revisions
+Added small atomic posting-revision manifests for exact-search validation, skip large snapshot rewrites when semantic revisions/capabilities are unchanged, preserve freshness in manifests, and coordinate board collection through a separate cross-process refresh lock. Contention falls back to available cache and reports partial coverage. Added bounded in-process ETag/Last-Modified reuse (eight responses, two MiB each); validators are not persisted across processes. Existing JSON storage remains sufficient. Eight focused transport/coordination tests and nineteen cache/pipeline/recovery tests passed.

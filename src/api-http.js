@@ -29,6 +29,7 @@ export function retryAfterMs(value,now = Date.now()) {
 }
 export function createApiClient({retries = 2,random = Math.random,fetchImpl = globalThis.fetch,signal,timeoutMs = 15000,delayMs = 1200,maxBytes = 16 * 1024 * 1024,now = Date.now,sleep = ms => delay(ms,undefined,{signal}),scheduler = new RequestScheduler({signal})} = {}) {
   if (!Number.isInteger(retries) || retries < 0 || retries > 3 || !Number.isFinite(timeoutMs) || timeoutMs <= 0 || !Number.isFinite(delayMs) || delayMs < 0 || !Number.isFinite(maxBytes) || maxBytes < 1) throw new Error('Invalid API HTTP configuration.');
+  const responseCache = new Map();
   const next = new Map(),cooldown = new Map(),gates = new Map();
   async function reserveStart(host) {
     const start = (gates.get(host) || Promise.resolve()).catch(() => {}).then(async () => {
@@ -60,7 +61,9 @@ export function createApiClient({retries = 2,random = Math.random,fetchImpl = gl
       let response;
       try {
         return await Promise.race([(async () => {
-          response = await fetchImpl(url.toString(),{method,headers:{Accept:json ? 'application/json' : 'text/plain,application/json','User-Agent':'jobs-finder-cli/2.0 (public posting APIs and URL indexes)'},signal:controller.signal,redirect:'error'});
+          const prior = method === 'GET' ? responseCache.get(url.toString()) : null;
+          response = await fetchImpl(url.toString(),{method,headers:{...(prior?.etag ? {'If-None-Match':prior.etag} : prior?.modified ? {'If-Modified-Since':prior.modified} : {}),Accept:json ? 'application/json' : 'text/plain,application/json','User-Agent':'jobs-finder-cli/2.0 (public posting APIs and URL indexes)'},signal:controller.signal,redirect:'error'});
+          if (response.status === 304 && prior) {await response.body?.cancel?.();return json ? JSON.parse(prior.body) : prior.body;}
           if (!response.ok) {
             const error = new AccessError(`${host}: HTTP ${response.status}${response.status === 429 ? ' (rate limited)' : [401,403].includes(response.status) ? ' (access restricted)' : ''}.`,response.status);
             error.retryAfter = retryAfterMs(response.headers?.get?.('retry-after'),now());
@@ -88,6 +91,8 @@ export function createApiClient({retries = 2,random = Math.random,fetchImpl = gl
             body = await response.text();
             if (Buffer.byteLength(body) > maxBytes) throw new AccessError(`${host}: response exceeds the safe size limit.`);
           }
+          const etag=response.headers?.get?.('etag'),modified=response.headers?.get?.('last-modified');
+          if (method === 'GET' && (etag || modified) && Buffer.byteLength(body) <= 2*1024*1024) {responseCache.delete(url.toString());responseCache.set(url.toString(),{body,etag,modified});if(responseCache.size>8)responseCache.delete(responseCache.keys().next().value);}
           if (!json) return body;
           try {return JSON.parse(body);} catch {throw new AccessError(`${host}: invalid JSON response.`);}
         })(),timeout]);

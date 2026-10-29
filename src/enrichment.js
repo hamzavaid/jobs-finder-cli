@@ -1,3 +1,4 @@
+import {normalizeJob} from './schema.js';
 const pending = new WeakMap();
 /** Share requests within a transport lifetime without retaining responses indefinitely. */
 export async function enrichOnce(provider,board,job,http) {
@@ -15,5 +16,5 @@ export function preserveEnrichment(previous,current) {
     merged.descriptionCompleteness = previous.descriptionCompleteness;
     merged.apiDetailsFetched = previous.apiDetailsFetched;
   }
-  return merged;
+  return normalizeJob(merged);
 }

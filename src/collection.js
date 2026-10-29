@@ -8,6 +8,9 @@ import {FilterEngine} from './filter-engine.js';
 import {boardKey,emptyStats} from './ats/shared.js';
 import {mapConcurrent} from './concurrency.js';
 
+export function postingRevision(jobs) {
+ return stableKey(jobs.map(({fetchedAt,firstSeenAt,lastSeenAt,lastObservedAt,cacheFetchedAt,cacheStatus,...job}) => job));
+}
 export function searchCacheKey(options,provider) {
   const {search,company,location,dateSeconds,remote,workplace,experience,employment,under,verified,limit,pages,sort,details,strict,websites} = options;
   return stableKey({retrievalVersion:4,parserVersion:PARSER_VERSION,provider,search:search.toLowerCase().replace(/\s+/g,' '),company:company.toLowerCase().replace(/\s+/g,' '),location:location.toLowerCase().replace(/\s+/g,' '),dateSeconds,remote,workplace,experience,employment,under,verified,limit,pages,sort,details,strict,websites:[...websites].sort()});
@@ -27,7 +30,7 @@ export class CollectionManager {
     const exact = await this.cache.read('search',key);
     if (!options.dateSeconds && exact && this.cache.fresh(exact) && exact.data.inventoryFingerprint === fingerprint) {
       const valid = await mapConcurrent(exact.data.refs,2,async ref => {
-        const cached = await this.cache.read('postings',ref.key);
+        const cached = this.cache.postingManifest ? await this.cache.postingManifest(ref.key) : await this.cache.read('postings',ref.key);
         return this.cache.fresh(cached) && cached.data.revision === ref.revision;
       },{signal:this.signal});
       if (valid.every(Boolean)) {this.report(provider.name,'exact search cache loaded');return {jobs:exact.data.jobs,stats:{...exact.data.stats,pages:0,cardsSeen:0,detailRequests:0,rejected:0,unknownExcluded:0,errors:[...new Set([...exact.data.stats.errors,...discovery.errors])],complete:exact.data.stats.complete && discovery.complete,cacheHits:exact.data.refs.length,exactCacheHit:true}};}
@@ -43,13 +46,14 @@ export class CollectionManager {
     let refreshes = 0,providerBlocked = Date.parse(inventory.providerRetryAt) > this.now();
     this.report(provider.name,`fetching jobs: 0 / ${boards.length} boards`);
     await mapConcurrent(snapshots,2,async ({board,key:boardCacheKey}) => {
+      const collect = async (cacheOnly = false) => {
       const cached = await this.cache.read('postings',boardCacheKey);
       this.signal?.throwIfAborted();
       let record = cached,dirty = false;
       const contentNeeded = provider.name === 'Greenhouse' && options.details;
       const fresh = this.cache.fresh(cached) && cached.data.parserVersion === PARSER_VERSION && (!contentNeeded || cached.data.content) && (cached.data.complete || (cached.data.pages || 0) >= options.pages);
       if (fresh) stats.cacheHits++;
-      else if (providerBlocked || refreshes >= this.maxBoards || (board.retryAt && Date.parse(board.retryAt) > this.now())) {
+      else if (cacheOnly || providerBlocked || refreshes >= this.maxBoards || (board.retryAt && Date.parse(board.retryAt) > this.now())) {
         if (!cached || !this.cache.usableStale(cached)) return;
         stats.staleBoards++;
       } else {
@@ -62,12 +66,12 @@ export class CollectionManager {
           stats.pages += outcome.pages;stats.resolutionAttempts = (stats.resolutionAttempts || 0) + (outcome.resolutionAttempts || 0);stats.resolutionSuccesses = (stats.resolutionSuccesses || 0) + (outcome.resolutionSuccesses || 0);
           const fetchedAt = new Date(this.now()).toISOString();
           const updated = {parserVersion:PARSER_VERSION,provider:provider.name,board,jobs:outcome.jobs.map(job => ({...preserveEnrichment(cached?.data.jobs.find(old => old.id === job.id),job),lastObservedAt:fetchedAt})),lastSuccessfulFetchAt:outcome.complete ? fetchedAt : cached?.data.lastSuccessfulFetchAt || cached?.updatedAt || fetchedAt,complete:outcome.complete,pages:outcome.pages,content:contentNeeded,
-            revision:stableKey(outcome.jobs.map(({fetchedAt,...job}) => job))};
+            revision:postingRevision(outcome.jobs)};
           // A truncated fetch never replaces a complete board inventory.
           if (!outcome.complete && cached) {
             const jobs = new Map(cached.data.jobs.filter(job => this.now() - Date.parse(job.lastObservedAt || cached.data.lastSuccessfulFetchAt || cached.updatedAt) <= CACHE_TTL.stale).map(job => [job.id,job]));
             for (const job of updated.jobs) jobs.set(job.id,job);
-            updated.jobs = [...jobs.values()];updated.revision = stableKey(updated.jobs);
+            updated.jobs = [...jobs.values()];updated.revision = postingRevision(updated.jobs);
           }
           record = {data:updated,updatedAt:new Date(this.now()).toISOString(),expiresAt:new Date(this.now() + (provider.cacheTtl || CACHE_TTL.postings)).toISOString()};dirty = true;
           changes.push({...board,status:'valid',lastJobFetchAt:new Date(this.now()).toISOString(),lastValidatedAt:new Date(this.now()).toISOString(),validationAttemptAt:new Date(this.now()).toISOString(),retryAt:boardRetryAt});
@@ -124,7 +128,7 @@ export class CollectionManager {
         }
       }
       if (dirty) {
-        record.data.jobs = enriched;record.data.revision = stableKey(enriched.map(({fetchedAt,...job}) => job));
+        record.data.jobs = enriched;record.data.revision = postingRevision(enriched);
         const remaining = Math.max(0,Date.parse(record.expiresAt) - this.now());
         try {record = await this.cache.put('postings',boardCacheKey,record.data,{ttl:remaining});}
         catch (error) {if (error.name === 'AbortError') throw error;stats.errors.push(`${provider.name}: board cache write failed: ${error.message}`);}
@@ -136,6 +140,8 @@ export class CollectionManager {
       }
       refs.push({key:boardCacheKey,revision:record.data.revision});
       this.report(provider.name,`fetching jobs: ${stats.boardsVisited} / ${boards.length} boards`);
+      };
+      if (this.cache.coordinateRefresh) await this.cache.coordinateRefresh(boardCacheKey,collect,() => stats.errors.push(`${provider.name}: board refresh active in another process; using available cache.`));else await collect();
     },{signal:this.signal});
     stats.boardsRefreshed = refreshes;stats.boardsSkipped = boards.length-stats.boardsVisited;stats.boardsBlocked = providerBlocked ? stats.boardsSkipped : 0;
     if (stats.detailRequests >= this.maxEnrichments) stats.errors.push(`${provider.name}: detail request budget reached; unmatched unknown attributes remain excluded.`);

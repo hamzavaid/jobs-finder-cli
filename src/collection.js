@@ -1,17 +1,18 @@
 import {CacheManager,CACHE_TTL,stableKey} from './cache.js';
 import {DiscoveryManager,inventoryFingerprint,mergeInventory} from './discovery.js';
 import {createApiClient} from './api-http.js';
+import {enrichOnce,preserveEnrichment} from './enrichment.js';
 import {FilterEngine} from './filter-engine.js';
 import {boardKey,emptyStats} from './ats/shared.js';
 import {mapConcurrent} from './concurrency.js';
 
 export function searchCacheKey(options,provider) {
   const {search,company,location,dateSeconds,remote,workplace,experience,employment,under,verified,limit,pages,sort,details,strict,websites} = options;
-  return stableKey({retrievalVersion:2,provider,search:search.toLowerCase().replace(/\s+/g,' '),company:company.toLowerCase().replace(/\s+/g,' '),location:location.toLowerCase().replace(/\s+/g,' '),dateSeconds,remote,workplace,experience,employment,under,verified,limit,pages,sort,details,strict,websites:[...websites].sort()});
+  return stableKey({retrievalVersion:3,provider,search:search.toLowerCase().replace(/\s+/g,' '),company:company.toLowerCase().replace(/\s+/g,' '),location:location.toLowerCase().replace(/\s+/g,' '),dateSeconds,remote,workplace,experience,employment,under,verified,limit,pages,sort,details,strict,websites:[...websites].sort()});
 }
 export class CollectionManager {
-  constructor({cache,http,signal,report = () => {},now = Date.now,maxBoards = 64,discoveryOptions = {}} = {}) {
-    Object.assign(this,{signal,report,now,maxBoards,discoveryOptions});
+  constructor({cache,http,signal,report = () => {},now = Date.now,maxBoards = 64,maxEnrichments = 40,discoveryOptions = {}} = {}) {
+    Object.assign(this,{signal,report,now,maxBoards,maxEnrichments,discoveryOptions});
     this.cache = cache || new CacheManager({signal,onWarning:message => report('Cache',message)});
     this.http = http || createApiClient({signal});
   }
@@ -57,7 +58,7 @@ export class CollectionManager {
           if ([401,403,429].includes(outcome.errorStatus)) {providerBlocked = true;inventory.providerRetryAt = boardRetryAt;}
           stats.pages += outcome.pages;
           const fetchedAt = new Date(this.now()).toISOString();
-          const updated = {provider:provider.name,board,jobs:outcome.jobs.map(job => ({...job,lastObservedAt:fetchedAt})),lastSuccessfulFetchAt:outcome.complete ? fetchedAt : cached?.data.lastSuccessfulFetchAt || cached?.updatedAt || fetchedAt,complete:outcome.complete,pages:outcome.pages,content:contentNeeded,
+          const updated = {provider:provider.name,board,jobs:outcome.jobs.map(job => ({...preserveEnrichment(cached?.data.jobs.find(old => old.id === job.id),job),lastObservedAt:fetchedAt})),lastSuccessfulFetchAt:outcome.complete ? fetchedAt : cached?.data.lastSuccessfulFetchAt || cached?.updatedAt || fetchedAt,complete:outcome.complete,pages:outcome.pages,content:contentNeeded,
             revision:stableKey(outcome.jobs.map(({fetchedAt,...job}) => job))};
           // A truncated fetch never replaces a complete board inventory.
           if (!outcome.complete && cached) {
@@ -82,19 +83,32 @@ export class CollectionManager {
       if (!record) return;
       stats.boardsVisited++;
       if (!record.data.complete) stats.partialBoards++;
+      // Bulk content costs one request and wins when several metadata-only records need it.
+      const unresolved = record.data.jobs.filter(job => !job.apiDetailsFetched && engine.evaluate(job).needsEnrichment);
+      if (provider.name === 'Greenhouse' && unresolved.length > 3 && stats.detailRequests < this.maxEnrichments) {
+        try {
+          stats.detailRequests++;
+          const bulk = await provider.fetchBoard(board,this.http,{content:true,pages:options.pages});
+          const byId = new Map(bulk.jobs.map(job => [job.id,job]));
+          record.data.jobs = record.data.jobs.map(job => preserveEnrichment(job,byId.get(job.id) || job));
+          record.data.content = true;dirty = true;
+        } catch (error) {if (error.name === 'AbortError') throw error;stats.errors.push(`${provider.name}: bulk enrichment failed: ${error.message}`);}
+      }
       const enriched = [];
       for (let job of record.data.jobs) {
         if (stats.cardsSeen && stats.cardsSeen % 512 === 0) {await new Promise(resolve => setImmediate(resolve));this.signal?.throwIfAborted();}
         stats.cardsSeen++;
         if (job.lastObservedAt && this.now() - Date.parse(job.lastObservedAt) > CACHE_TTL.stale) continue;
-        if (provider.name === 'Greenhouse' && (options.dateSeconds || options.strict) && engine.keywords(job)) {
-          const precheck = engine.evaluate(job);
-          const enrichable = precheck.unknowns.some(field => !['under','verified'].includes(field));
-          if (!job.apiDetailsFetched && !precheck.failures.length && (options.dateSeconds && !job.postedAt || options.strict && enrichable) && stats.detailRequests < 200) {
-            try {stats.detailRequests++;job = await provider.fetchDetail(board,job.providerJobId,this.http);dirty = true;}
-            catch (error) {if (error.name === 'AbortError') throw error;stats.errors.push(`${provider.name}: detail ${job.providerJobId}: ${error.message}`);}
+        const initial = engine.evaluate(job);
+        const needsContent = initial.needsEnrichment || options.details && job.descriptionCompleteness !== 'complete';
+        const needsMetadata = provider.name === 'Greenhouse' && (options.dateSeconds && !job.postedAt || options.strict && initial.unknowns.some(field => !['under','verified'].includes(field)));
+        if (provider.enrichJob && !job.apiDetailsFetched && !initial.failures.some(field => field !== 'search')) {
+          if ((needsContent || needsMetadata) && stats.detailRequests < this.maxEnrichments) {
+            try {stats.detailRequests++;job = preserveEnrichment(job,await enrichOnce(provider,board,job,this.http));dirty = true;}
+            catch (error) {if (error.name === 'AbortError') throw error;stats.errors.push(`${provider.name}: incomplete enrichment ${job.providerJobId}: ${error.message}`);job = {...job,resolutionStatus:'incomplete'};}
           }
         }
+        if (needsContent && !engine.keywords(job) && job.descriptionCompleteness !== 'complete') stats.errors.push(`${provider.name}: incomplete keyword evidence for ${job.id}; not classified as irrelevant.`);
         enriched.push(job);
         const decision = engine.evaluate(job);
         if (!decision.match) {stats.rejected++;if (decision.unknowns.length) stats.unknownExcluded++;continue;}
@@ -113,7 +127,7 @@ export class CollectionManager {
       refs.push({key:boardCacheKey,revision:record.data.revision});
       this.report(provider.name,`fetching jobs: ${stats.boardsVisited} / ${boards.length} boards`);
     },{signal:this.signal});
-    if (stats.detailRequests >= 200) stats.errors.push(`${provider.name}: detail request budget reached; unmatched unknown attributes remain excluded.`);
+    if (stats.detailRequests >= this.maxEnrichments) stats.errors.push(`${provider.name}: detail request budget reached; unmatched unknown attributes remain excluded.`);
     if (changes.length) {
       try {await this.cache.update('inventory',provider.name,current => mergeInventory(current,{...inventory,boards:changes}));}
       catch (error) {if (error.name === 'AbortError') throw error;stats.errors.push(`${provider.name}: inventory cache write failed: ${error.message}`);}

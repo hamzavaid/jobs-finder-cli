@@ -23,6 +23,7 @@ export function normalizeAshby(raw,board) {
   });
 }
 export const ashbyProvider = {
+  async enrichJob(board,job) {return job;},
   name:'Ashby',kind:'ats',domains:['jobs.ashbyhq.com'],apiUrl:ashbyUrl,
   async fetchBoard(board,http) {
     const data = await http.json(ashbyUrl(board));

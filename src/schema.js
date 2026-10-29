@@ -7,6 +7,7 @@ export function normalizeJob(job) {
     sourceUrl:null, postedAt:null, datePrecision:null, postedText:null, workplace:null,
     employmentType:null, seniorityLevel:null, salary:null, description:null,
     applicantCount:null, underTenApplicants:null, verified:null, detailsFetched:false,
+    descriptionCompleteness:job.description ? (job.detailsFetched ? 'complete' : 'partial') : 'title-only',
     fetchedAt:new Date().toISOString(), ...job};
 }
 export function structuredJobs(html) {

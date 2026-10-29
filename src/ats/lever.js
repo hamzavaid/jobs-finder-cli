@@ -24,6 +24,7 @@ export function normalizeLever(raw, board) {
   });
 }
 export const leverProvider = {
+  async enrichJob(board,job,http) {const raw = await http.json(leverUrl(board,{jobId:job.providerJobId}));const full = normalizeLever(raw,board);if (!full || full.id !== job.id) throw new Error('Lever detail identity mismatch.');return {...full,apiDetailsFetched:true};},
   name:'Lever',kind:'ats',domains:['jobs.lever.co','jobs.eu.lever.co'],apiUrl:leverUrl,
   async fetchBoard(board,http,{pages = 5} = {}) {
     const jobs = new Map();

@@ -23,6 +23,7 @@ export function normalizeGreenhouse(raw, board) {
   });
 }
 export const greenhouseProvider = {
+  enrichJob(board,job,http) {return this.fetchDetail(board,job.providerJobId,http);},
   name:'Greenhouse', kind:'ats', domains:['boards.greenhouse.io','job-boards.greenhouse.io'], apiUrl:greenhouseUrl,
   async fetchCompany(board,http) {
     const data = await http.json(`https://boards-api.greenhouse.io/v1/boards/${assertBoard(board)}`);

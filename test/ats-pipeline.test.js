@@ -18,6 +18,7 @@ function fixtureApi() {
     head:async value => {calls.push(value);return {status:200};},
     json:async value => {
       calls.push(value);
+      if (/greenhouse\.io.*\/jobs\/123/.test(value)) return {id:123,title:'Pastry Chef',content:'Prepare pastry in a kitchen.',absolute_url:'https://example.com/jobs/123'};
       if (value.includes('greenhouse.io')) return {jobs:[{id:123,title:'Pastry Chef',location:{name:'Boston'},absolute_url:'https://example.com/jobs/123'}]};
       if (value.includes('lever.co')) return [{id:'lever-123',text:'Pastry Chef',categories:{location:'Boston',commitment:'Full-time'},hostedUrl:'https://jobs.lever.co/example/lever-123'}];
       return {jobs:[{id:'ashby-123',title:'Pastry Chef',isListed:true,workplaceType:'OnSite',employmentType:'FullTime',location:'Boston',jobUrl:'https://jobs.ashbyhq.com/example/ashby-123'}]};
@@ -33,14 +34,15 @@ test('first run automatically discovers, validates, fetches and caches; repeat s
   const second = await manager.find(greenhouseProvider,options);
   assert.equal(second.stats.exactCacheHit,true);assert.equal(http.calls.length,count);
   const different = await manager.find(greenhouseProvider,{...options,search:'accountant'});
-  assert.equal(different.jobs.length,0);assert.equal(http.calls.length,count);
+  assert.equal(different.jobs.length,0);assert.equal(http.calls.length,count+1);
+  await manager.find(greenhouseProvider,{...options,search:'teacher'});assert.equal(http.calls.length,count+1);
 }));
 test('underlying posting revision invalidates an exact-search cache', async () => temporary(async root => {
   const cache = new CacheManager({root}),http = fixtureApi(),manager = new CollectionManager({cache,http});
   const options = normalizeOptions({search:'chef',website:'Greenhouse'});
   await manager.find(greenhouseProvider,options);
   const record = await cache.read('postings','Greenhouse:global:example');
-  await cache.put('postings','Greenhouse:global:example',{...record.data,revision:'changed',jobs:record.data.jobs.map(job => ({...job,title:'Accountant'}))},{ttl:60000});
+  await cache.put('postings','Greenhouse:global:example',{...record.data,revision:'changed',jobs:record.data.jobs.map(job => ({...job,title:'Accountant',description:'Maintain financial records.',descriptionCompleteness:'complete',apiDetailsFetched:true}))},{ttl:60000});
   const result = await manager.find(greenhouseProvider,options);
   assert.equal(result.jobs.length,0);assert.notEqual(result.stats.exactCacheHit,true);
 }));

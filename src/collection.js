@@ -14,7 +14,7 @@ export function postingRevision(jobs) {
 }
 export function searchCacheKey(options,provider) {
   const {search,company,location,dateSeconds,remote,workplace,experience,employment,under,verified,limit,pages,sort,details,strict,websites} = options;
-  return stableKey({retrievalVersion:4,parserVersion:PARSER_VERSION,provider,search:search.toLowerCase().replace(/\s+/g,' '),company:company.toLowerCase().replace(/\s+/g,' '),location:location.toLowerCase().replace(/\s+/g,' '),dateSeconds,remote,workplace,experience,employment,under,verified,limit,pages,sort,details,strict,websites:[...websites].sort()});
+  return stableKey({retrievalVersion:5,parserVersion:PARSER_VERSION,provider,search:normalizeText(search),company:normalizeText(company),location:normalizeText(location),dateSeconds,remote,workplace,experience,employment,under,verified,limit,pages,sort,details,strict,websites:[...websites].sort()});
 }
 export class CollectionManager {
   constructor({cache,http,signal,report = () => {},now = Date.now,maxBoards = 64,maxEnrichments = 40,discoveryOptions = {}} = {}) {
@@ -22,20 +22,61 @@ export class CollectionManager {
     this.cache = cache || new CacheManager({signal,onWarning:message => report('Cache',message)});
     this.http = http || createApiClient({signal});
   }
+  async lookupExact(provider,options) {
+    this.signal?.throwIfAborted();
+    const inventory = provider.kind === 'feed' ? feedInventory(provider) : (await this.cache.read('inventory',provider.name))?.data;
+    const key=searchCacheKey(options,provider.name);
+    const miss=reason=>({key,inventory,reason});
+    if(options.dateSeconds)return miss('rolling date filter requires evaluation');
+    if(!inventory)return miss('inventory missing');
+    const exact=await this.cache.read('search',key);
+    if(!exact)return miss('search cache missing or corrupt');
+    if(!this.cache.fresh(exact))return miss('search TTL expired');
+    if(exact.data.parserVersion!==PARSER_VERSION || exact.data.cachePolicyVersion!==1)return miss('incompatible parser or cache policy');
+    if(exact.data.inventoryFingerprint!==inventoryFingerprint(inventory))return miss('inventory membership changed');
+    const validation=await mapConcurrent(exact.data.refs,2,async ref=>{
+      this.signal?.throwIfAborted();
+      if(!Number.isFinite(Date.parse(ref.validUntil)) || Date.parse(ref.validUntil)<=this.now())return 'snapshot freshness or stale retention expired';
+      const record=this.cache.postingManifest ? await this.cache.postingManifest(ref.key) : await this.cache.read('postings',ref.key);
+      if(!record)return 'snapshot missing, corrupt or being replaced';
+      if(record.data.parserVersion!==PARSER_VERSION)return 'snapshot parser changed';
+      if(record.data.revision!==ref.revision)return 'posting revision changed';
+      const retention=Date.parse(record.data.lastSuccessfulFetchAt || record.updatedAt)+CACHE_TTL.stale;
+      if(!Number.isFinite(retention)||retention<=this.now())return 'stale retention expired';
+      if(!ref.stale && !this.cache.fresh(record))return 'snapshot freshness expired';
+      return null;
+    },{signal:this.signal});
+    const failed=validation.find(Boolean);if(failed)return miss(failed);
+    if(exact.data.jobs.some(job=>job.expiresAt && Date.parse(job.expiresAt)<=this.now()))return miss('posting expired');
+    const coverage=exact.data.coverage;
+    const stats={...exact.data.stats,coverage,pages:0,cardsSeen:0,detailRequests:0,rejected:0,unknownExcluded:0,
+      boardsVisited:0,boardsRefreshed:0,postingSnapshotHits:0,completePostings:0,incompletePostings:0,
+      bulkAttempts:0,bulkSuccesses:0,bulkFailures:0,detailCacheHits:0,acceptedAfterFiltering:0,
+      cacheHits:exact.data.refs.length,inventoryCacheHit:true,exactCacheHit:true,exactCacheMisses:0,
+      timings:{discoveryMs:0,collectionMs:0,enrichmentMs:0,filteringMs:0}};
+    this.report(provider.name,'exact-search cache hit');
+    return {key,inventory,outcome:{jobs:exact.data.jobs,stats}};
+  }
   async find(provider,options) {
-    const stats = {...emptyStats(),boardsKnown:0,boardsVisited:0,cacheHits:0,staleBoards:0,complete:false,duplicatesRemoved:0,partialBoards:0,failedBoards:0};
-    const discovery = provider.kind === 'feed' ? {inventory:{provider:provider.name,boards:[{id:'public-feed',region:'global',status:'valid'}],cursors:{}},errors:[],complete:true} : await new DiscoveryManager({cache:this.cache,http:this.http,signal:this.signal,report:this.report,now:this.now,...this.discoveryOptions}).ensure(provider);
-    const inventory = discovery.inventory,sourceTtl = provider.cacheTtl || CACHE_TTL.postings;
+    const started=performance.now(),before={...this.cache.metrics};
+    const first=await this.lookupExact(provider,options);
+    const work=async()=>{const probe=await this.lookupExact(provider,options);return probe.outcome || this.collect(provider,options,probe);};
+    let outcome;
+    if(first.outcome)outcome=first.outcome;
+    else outcome=this.cache.coordinateSearch ? await this.cache.coordinateSearch(first.key,work) : await work();
+    const after=this.cache.metrics || {};
+    outcome.stats.timings={...outcome.stats.timings,cacheReadMs:(after.readMs||0)-(before.readMs||0),cacheWriteMs:(after.writeMs||0)-(before.writeMs||0),elapsedMs:performance.now()-started};
+    return outcome;
+  }
+  async collect(provider,options,probe) {
+    const stats = {...emptyStats(),boardsKnown:0,boardsVisited:0,cacheHits:0,staleBoards:0,complete:false,duplicatesRemoved:0,partialBoards:0,failedBoards:0,
+      exactCacheHit:false,exactCacheMisses:1,exactCacheMissReason:probe.reason,inventoryCacheHit:!!probe.inventory,postingSnapshotHits:0,acceptedAfterFiltering:0,
+      timings:{discoveryMs:0,collectionMs:0,enrichmentMs:0,filteringMs:0}};
+    const discoveryStarted=performance.now();
+    const discovery=provider.kind==='feed' ? {inventory:feedInventory(provider),errors:[],complete:true} : await new DiscoveryManager({cache:this.cache,http:this.http,signal:this.signal,report:this.report,now:this.now,...this.discoveryOptions}).ensure(provider);
+    stats.timings.discoveryMs=performance.now()-discoveryStarted;
+    const inventory=discovery.inventory,sourceTtl=provider.cacheTtl || CACHE_TTL.postings,key=probe.key;
     stats.errors.push(...discovery.errors);
-    const fingerprint = inventoryFingerprint(inventory), key = searchCacheKey(options,provider.name);
-    const exact = await this.cache.read('search',key);
-    if (!options.dateSeconds && exact && this.cache.fresh(exact) && exact.data.inventoryFingerprint === fingerprint) {
-      const valid = await mapConcurrent(exact.data.refs,2,async ref => {
-        const cached = this.cache.postingManifest ? await this.cache.postingManifest(ref.key) : await this.cache.read('postings',ref.key);
-        return this.cache.fresh(cached) && cached.data.revision === ref.revision;
-      },{signal:this.signal});
-      if (valid.every(Boolean)) {this.report(provider.name,'exact search cache loaded');return {jobs:exact.data.jobs,stats:{...exact.data.stats,pages:0,cardsSeen:0,detailRequests:0,rejected:0,unknownExcluded:0,errors:[...new Set([...exact.data.stats.errors,...discovery.errors])],complete:exact.data.stats.complete && discovery.complete,cacheHits:exact.data.refs.length,exactCacheHit:true}};}
-    }
     const boards = inventory.boards.filter(board => board.status === 'valid' || board.status === 'pending');
     if (!boards.length) throw new Error(`${provider.name}: no validated boards available${discovery.errors.length ? '; ' + discovery.errors.join(' | ') : '; discovery or validation is incomplete'}.`);
     stats.boardsKnown = boards.length;
@@ -48,12 +89,13 @@ export class CollectionManager {
     this.report(provider.name,`fetching jobs: 0 / ${boards.length} boards`);
     await mapConcurrent(snapshots,2,async ({board,key:boardCacheKey}) => {
       const collect = async (cacheOnly = false) => {
-      const cached = await this.cache.read('postings',boardCacheKey);
+      let cached = await this.cache.read('postings',boardCacheKey);
+      if(cached?.data.parserVersion !== PARSER_VERSION)cached=null;
       this.signal?.throwIfAborted();
       let record = cached,dirty = false;
       const contentNeeded = provider.name === 'Greenhouse' && options.details;
       const fresh = this.cache.fresh(cached) && cached.data.parserVersion === PARSER_VERSION && (!contentNeeded || cached.data.content) && (cached.data.complete || (cached.data.pages || 0) >= options.pages);
-      if (fresh) stats.cacheHits++;
+      if (fresh) {stats.cacheHits++;stats.postingSnapshotHits++;}
       else if (cacheOnly || providerBlocked || refreshes >= this.maxBoards || (board.retryAt && Date.parse(board.retryAt) > this.now())) {
         if (!cached || !this.cache.usableStale(cached)) return;
         stats.staleBoards++;
@@ -124,7 +166,7 @@ export class CollectionManager {
         enriched.push(job);
         const decision = engine.evaluate(job);
         if (!decision.match) {stats.rejected++;if (decision.unknowns.length) stats.unknownExcluded++;continue;}
-        boardMatches++;
+        boardMatches++;stats.acceptedAfterFiltering++;
         if (results.has(job.id)) stats.duplicatesRemoved++;
         results.set(job.id,{...job,cacheStatus:this.cache.fresh(record) && (!job.lastObservedAt || this.now() - Date.parse(job.lastObservedAt) < sourceTtl) ? 'fresh' : 'stale',cacheFetchedAt:job.lastObservedAt || record.data.lastSuccessfulFetchAt || record.updatedAt});
         if (results.size > options.limit * 2) {
@@ -142,7 +184,10 @@ export class CollectionManager {
         const observed = observeBoard(changedIndex >= 0 ? changes[changedIndex] : board,options,boardMatches,this.now());
         if (changedIndex >= 0) changes[changedIndex] = observed;else changes.push(observed);
       }
-      refs.push({key:boardCacheKey,revision:record.data.revision});
+      const stale=!this.cache.fresh(record);
+      const retention=Date.parse(record.data.lastSuccessfulFetchAt || record.updatedAt)+CACHE_TTL.stale;
+      refs.push({key:boardCacheKey,revision:record.data.revision,stale,
+        validUntil:new Date(stale ? retention : Math.min(retention,Date.parse(record.expiresAt))).toISOString()});
       this.report(provider.name,`fetching jobs: ${stats.boardsVisited} / ${boards.length} boards`);
       };
       if (this.cache.coordinateRefresh) await this.cache.coordinateRefresh(boardCacheKey,collect,() => stats.errors.push(`${provider.name}: board refresh active in another process; using available cache.`));else await collect();
@@ -159,13 +204,16 @@ export class CollectionManager {
     if (!stats.boardsVisited) throw new Error(`${provider.name}: no board data could be collected. ${stats.errors.slice(0,3).join(' | ')}`);
     this.report(provider.name,'filtering and deduplicating');
     const jobs = engine.sort([...results.values()]).slice(0,options.limit);
-    if (!stats.staleBoards && !options.dateSeconds) {
+    stats.coverage={complete:stats.complete,boardsKnown:stats.boardsKnown,boardsVisited:stats.boardsVisited,boardsSkipped:stats.boardsSkipped,staleBoards:stats.staleBoards,partialBoards:stats.partialBoards};
+    if (!options.dateSeconds) {
       const changed = new Map(changes.map(board => [boardKey(board),board]));
-      const ttl = Math.max(0,Math.min(CACHE_TTL.search,...jobs.map(job => job.expiresAt ? Date.parse(job.expiresAt)-this.now() : CACHE_TTL.search),...jobs.map(job => (Date.parse(job.cacheFetchedAt) || this.now()) + (job.cacheStatus === 'stale' ? CACHE_TTL.stale : sourceTtl) - this.now())));
-      try {await this.cache.put('search',key,{jobs,stats,refs,inventoryFingerprint:inventoryFingerprint({...inventory,boards:inventory.boards.map(board => changed.get(boardKey(board)) || board)})},{ttl});}
+      const ttl = Math.max(0,Math.min(stats.complete ? CACHE_TTL.search : CACHE_TTL.partialSearch,...refs.map(ref=>Date.parse(ref.validUntil)-this.now()),...jobs.map(job => job.expiresAt ? Date.parse(job.expiresAt)-this.now() : CACHE_TTL.search),...jobs.map(job => (Date.parse(job.cacheFetchedAt) || this.now()) + (job.cacheStatus === 'stale' ? CACHE_TTL.stale : sourceTtl) - this.now())));
+      try {await this.cache.put('search',key,{jobs,stats,refs,coverage:stats.coverage,parserVersion:PARSER_VERSION,cachePolicyVersion:1,inventoryFingerprint:inventoryFingerprint({...inventory,boards:inventory.boards.map(board => changed.get(boardKey(board)) || board)})},{ttl});}
       catch (error) {if (error.name === 'AbortError') throw error;stats.errors.push(`${provider.name}: search cache write failed: ${error.message}`);}
     }
     stats.complete = stats.complete && !stats.errors.length;
     return {jobs,stats};
   }
 }
+
+function feedInventory(provider) {return {provider:provider.name,boards:[{id:'public-feed',region:'global',status:'valid'}],cursors:{}};}

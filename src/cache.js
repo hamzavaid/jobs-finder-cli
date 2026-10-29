@@ -5,8 +5,8 @@ import {createHash,randomUUID} from 'node:crypto';
 import {setTimeout as sleep} from 'node:timers/promises';
 import {validBoardId,publicLink} from './ats/shared.js';
 
-const DAY = 86400000, kinds = new Set(['inventory','postings','search','resolution','manifest']);
-export const CACHE_TTL = Object.freeze({postings:20 * 60000,search:10 * 60000,stale:7 * DAY});
+const DAY = 86400000, kinds = new Set(['inventory','postings','search','resolution','manifest','maintenance']);
+export const CACHE_TTL = Object.freeze({postings:20 * 60000,search:10 * 60000,stale:7 * DAY,partialSearch:3 * 60000,prune:DAY,enrichmentTransient:5 * 60000,enrichmentStructural:DAY});
 export function defaultCacheDir(env = process.env,platform = process.platform,home = homedir()) {
   if (env.JOBS_CACHE_DIR) return env.JOBS_CACHE_DIR;
   if (platform === 'win32') return join(env.LOCALAPPDATA || join(home,'AppData','Local'),'jobs-finder-cli','Cache');
@@ -27,6 +27,7 @@ export function validCacheRecord(record,kind,key) {
   const data = record.data;
   if (!data || typeof data !== 'object') return false;
   if (kind !== 'inventory' && record.expiresAt === null) return false;
+  if (kind === 'maintenance') return Number.isFinite(Date.parse(data.lastPrunedAt));
   if (kind === 'manifest') return typeof data.revision === 'string' && typeof data.pending === 'boolean';
   if (kind === 'resolution') return ['complete','incomplete','blocked','unsupported','failed'].includes(data.status) && (data.job === null || data.job && typeof data.job.title === 'string' && !!publicLink(data.job.url));
   if (kind === 'inventory') return typeof data.provider === 'string' && data.cursors && typeof data.cursors === 'object' && !Array.isArray(data.cursors) && Array.isArray(data.boards) && data.boards.length <= 50000 && data.boards.every(board => board && validBoardId(board.id) && ['global','eu'].includes(board.region || 'global') && ['pending','valid','invalid'].includes(board.status));
@@ -37,29 +38,35 @@ export class CacheManager {
   constructor({root = defaultCacheDir(),now = Date.now,signal,lockTimeoutMs = 2000,onWarning = () => {}} = {}) {
     Object.assign(this,{root,now,signal,lockTimeoutMs,onWarning});
     this.pending = new Map();
+    this.metrics = {readMs:0,writeMs:0,postingReads:0,manifestChecks:0,pruneRuns:0};
   }
   path(kind,key) {
     if (!kinds.has(kind) || typeof key !== 'string') throw new Error('Invalid internal cache key.');
     return join(this.root,kind,stableKey(key) + '.json');
   }
   fresh(record) {return !!record && (record.expiresAt === null || Date.parse(record.expiresAt) > this.now());}
-  usableStale(record) {return !!record && this.now() - Date.parse(record.data?.lastSuccessfulFetchAt || record.updatedAt) <= CACHE_TTL.stale;}
+  usableStale(record) {const age=this.now()-Date.parse(record?.data?.lastSuccessfulFetchAt || record?.updatedAt);return !!record && age>=0 && age<=CACHE_TTL.stale;}
   async rawRead(kind,key) {
+    if (kind === 'postings') this.metrics.postingReads++;
     const path = this.path(kind,key);
     try {
-      const info = await stat(path);
-      if (info.size > 64 * 1024 * 1024) throw new Error('Oversized cache file.');
-      const record = JSON.parse(await readFile(path,'utf8'));
+      const handle=await open(path,'r');let info,record;
+      try {info=await handle.stat();if(info.size>64*1024*1024)throw new Error('Oversized cache file.');record=JSON.parse(await handle.readFile('utf8'));}finally{await handle.close();}
       if (!validCacheRecord(record,kind,key)) throw new Error('Invalid cache schema.');
+      Object.defineProperty(record,'fileStamp',{value:fileStamp(info),enumerable:false});
       return record;
     } catch (error) {if (error.code === 'ENOENT') return null; throw error;}
   }
   async read(kind,key) {
+    const started=performance.now();
+    try {return await this.readRecord(kind,key);} finally {this.metrics.readMs += performance.now()-started;}
+  }
+  async readRecord(kind,key) {
     try {
       const record = await this.rawRead(kind,key);
       if (record && kind === 'postings') {
         const manifest = await this.rawRead('manifest',key).catch(() => null);
-        if (manifest && !manifest.data.pending && manifest.data.revision === record.data.revision) {
+        if (manifest && !manifest.data.pending && sameStamp(manifest.data.snapshotStamp,record.fileStamp) && manifest.data.revision === record.data.revision && validManifestTimes(manifest,this.now())) {
           record.expiresAt = manifest.expiresAt;record.updatedAt = manifest.updatedAt;
           record.data.lastSuccessfulFetchAt = manifest.data.lastSuccessfulFetchAt || record.data.lastSuccessfulFetchAt;
           if (manifest.data.observedAt) record.data.jobs = record.data.jobs.map(job => ({...job,lastSeenAt:manifest.data.observedAt,lastObservedAt:manifest.data.observedAt}));
@@ -130,6 +137,7 @@ export class CacheManager {
   }
   update(kind,key,mutate,{ttl = null} = {}) {
     const queueKey = `${kind}:${key}`, previous = this.pending.get(queueKey) || Promise.resolve();
+    const started=performance.now();
     const result = previous.catch(() => {}).then(() => this.withLock(kind,key,async () => {
       let current;
       try {current = await this.rawRead(kind,key);}
@@ -153,30 +161,59 @@ export class CacheManager {
       return record;
     }));
     this.pending.set(queueKey,result);
-    result.finally(() => {if (this.pending.get(queueKey) === result) this.pending.delete(queueKey);}).catch(() => {});
+    result.finally(() => {this.metrics.writeMs += performance.now()-started;if (this.pending.get(queueKey) === result) this.pending.delete(queueKey);}).catch(() => {});
     return result;
   }
   async put(kind,key,data,options = {}) {
     if (kind !== 'postings') return this.update(kind,key,() => data,options);
-    const previous = await this.read(kind,key);
-    const manifest = {revision:data.revision,pending:true,parserVersion:data.parserVersion,lastSuccessfulFetchAt:data.lastSuccessfulFetchAt,observedAt:data.complete ? data.lastSuccessfulFetchAt : null};
-    await this.update('manifest',key,() => manifest,options);
-    const unchanged = previous?.data.revision === data.revision && previous.data.parserVersion === data.parserVersion && previous.data.complete === data.complete && previous.data.content === data.content && previous.data.pages === data.pages;
-    const record = unchanged ? {...previous,data,updatedAt:new Date(this.now()).toISOString(),expiresAt:new Date(this.now()+(options.ttl ?? CACHE_TTL.postings)).toISOString()} : await this.update(kind,key,() => data,options);
-    await this.update('manifest',key,() => ({...manifest,pending:false}),options);
-    return record;
+    return this.withLock('postings',key+':commit',async () => {
+      const previous = await this.read(kind,key);
+      const manifest = {revision:data.revision,pending:true,parserVersion:data.parserVersion,lastSuccessfulFetchAt:data.lastSuccessfulFetchAt,observedAt:data.complete ? data.lastSuccessfulFetchAt : null};
+      await this.update('manifest',key,() => manifest,options);
+      const unchanged = previous?.data.revision === data.revision && previous.data.parserVersion === data.parserVersion && previous.data.complete === data.complete && previous.data.content === data.content && previous.data.pages === data.pages && stableKey(previous.data.enrichment || {}) === stableKey(data.enrichment || {});
+      const record = unchanged ? {...previous,data,updatedAt:new Date(this.now()).toISOString(),expiresAt:new Date(this.now()+(options.ttl ?? CACHE_TTL.postings)).toISOString()} : await this.update(kind,key,() => data,options);
+      const snapshotStamp=fileStamp(await stat(this.path(kind,key)));
+      await this.update('manifest',key,() => ({...manifest,pending:false,snapshotStamp}),options);
+      return record;
+    });
   }
   async postingManifest(key) {
+    this.metrics.manifestChecks++;
     const manifest = await this.read('manifest',key);
-    if (manifest) return manifest.data.pending ? null : manifest;
-    return this.read('postings',key);
+    if (manifest?.data.pending) return null;
+    const info=await stat(this.path('postings',key)).catch(error => {if(error.code==='ENOENT')return null;throw error;});
+    if (!info) return null;
+    if (manifest?.data.snapshotStamp) return sameStamp(manifest.data.snapshotStamp,fileStamp(info)) && validManifestTimes(manifest,this.now()) ? manifest : null;
+    // Legacy manifests have no file identity. Validate the shard once, then upgrade
+    // conservatively from the snapshot rather than extending its source timestamps.
+    return this.withLock('postings',key+':commit',async () => {
+      const record=await this.read('postings',key);if(!record)return null;
+      const metadata={revision:record.data.revision,pending:false,parserVersion:record.data.parserVersion,lastSuccessfulFetchAt:record.data.lastSuccessfulFetchAt || record.updatedAt,observedAt:null,snapshotStamp:record.fileStamp};
+      const ttl=Math.max(0,Date.parse(record.expiresAt)-this.now());
+      await this.update('manifest',key,() => metadata,{ttl});return record;
+    });
+  }
+  async coordinateSearch(key,work) {
+    let started=false;
+    try{return await this.withLock('search',key+':collect',()=>{started=true;return work();});}
+    catch(error){if(!started && ['EACCES','EPERM','ENOTDIR'].includes(error.code)){this.onWarning('Search cache lock unavailable; collecting without search coordination.');return work();}throw error;}
   }
   async coordinateRefresh(key,work,onBusy = () => {}) {
     try {return await this.withLock('postings',key+':refresh',() => work(false));}
     catch (error) {if (['EACCES','EPERM','ENOTDIR'].includes(error.code)) {this.onWarning('Cache refresh lock unavailable; collecting without refresh coordination.');return work(false);}if (!/cache is busy in another process/.test(error.message)) throw error;onBusy();return work(true);}
   }
   async flush() {await Promise.allSettled([...this.pending.values()]);}
+  async pruneIfDue() {
+    const previous=await this.read('maintenance','prune');
+    if(previous && this.now()-Date.parse(previous.data.lastPrunedAt)<CACHE_TTL.prune)return false;
+    return this.withLock('maintenance','prune:run',async()=>{
+      const current=await this.read('maintenance','prune');
+      if(current && this.now()-Date.parse(current.data.lastPrunedAt)<CACHE_TTL.prune)return false;
+      await this.prune();await this.put('maintenance','prune',{lastPrunedAt:new Date(this.now()).toISOString()},{ttl:CACHE_TTL.prune});return true;
+    });
+  }
   async prune() {
+    this.metrics.pruneRuns++;
     // Shards are independent; pruning never removes inventories or live locks.
     for (const kind of kinds) {
       const directory = join(this.root,kind);
@@ -200,4 +237,11 @@ export class CacheManager {
       }
     }
   }
+}
+
+function fileStamp(info) {return {size:info.size,mtimeMs:info.mtimeMs,ctimeMs:info.ctimeMs,ino:info.ino};}
+function sameStamp(a,b) {return !!a && !!b && ['size','mtimeMs','ctimeMs','ino'].every(key => a[key]===b[key]);}
+function validManifestTimes(record,now) {
+ const observed=Date.parse(record.data.observedAt || record.data.lastSuccessfulFetchAt);
+ return Number.isFinite(observed) && observed <= now && Date.parse(record.updatedAt)<=now && observed <= Date.parse(record.updatedAt) && (!record.data.observedAt || Date.parse(record.data.observedAt)===Date.parse(record.data.lastSuccessfulFetchAt));
 }

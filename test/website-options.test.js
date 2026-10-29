@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {normalizeOptions, evaluateJob} from '../src/filters.js';
 
 test('default searches all six websites', () => {
-  assert.deepEqual(normalizeOptions({search:'sous chef'}).websites, ['LinkedIn','Indeed','Glassdoor','Greenhouse','Lever','Ashby']);
+  assert.deepEqual(normalizeOptions({search:'sous chef'}).websites, ['LinkedIn','Indeed','Glassdoor','Greenhouse','Lever','Ashby','SmartRecruiters','Personio','Remotive','Himalayas']);
 });
 test('supports the exact multi-value website syntax with case-insensitive names', () => {
   assert.deepEqual(normalizeOptions({search:'accountant',website:['LinkedIn','Indeed']}).websites, ['LinkedIn','Indeed']);

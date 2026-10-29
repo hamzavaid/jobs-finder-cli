@@ -13,7 +13,7 @@ export async function findJobs(options, http, context = {}) {
     facetReliant:[], errors:[], providers:{}};
   let successfulProviders = 0;
   let collection;
-  if ((options.websites ?? Object.keys(providers)).some(site => providers[site]?.kind === 'ats')) {
+  if ((options.websites ?? Object.keys(providers)).some(site => ['ats','feed'].includes(providers[site]?.kind))) {
     collection = context.collection || new CollectionManager({...context,http:context.apiHttp || createApiClient({signal:context.signal,delayMs:options.delay})});
   }
   const candidateOptions = {...options,limit:Math.min(1000,Math.max(100,options.limit * 4))};
@@ -24,7 +24,7 @@ export async function findJobs(options, http, context = {}) {
       context.report?.(site,'searching');
       const provider = providers[site];
       if (!provider) throw new Error(`Unknown provider: ${site}`);
-      const outcome = provider.kind === 'ats' ? await collection.find(provider,candidateOptions) : await searchProvider(provider,candidateOptions,http);
+      const outcome = ['ats','feed'].includes(provider.kind) ? await collection.find(provider,candidateOptions) : await searchProvider(provider,candidateOptions,http);
       context.signal?.throwIfAborted();
       context.report?.(site,`${outcome.jobs.length} matching jobs collected`);
       return {site,outcome};

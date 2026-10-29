@@ -18,7 +18,7 @@ export class CollectionManager {
   }
   async find(provider,options) {
     const stats = {...emptyStats(),boardsKnown:0,boardsVisited:0,cacheHits:0,staleBoards:0,complete:false,duplicatesRemoved:0,partialBoards:0,failedBoards:0};
-    const discovery = await new DiscoveryManager({cache:this.cache,http:this.http,signal:this.signal,report:this.report,now:this.now,...this.discoveryOptions}).ensure(provider);
+    const discovery = provider.kind === 'feed' ? {inventory:{provider:provider.name,boards:[{id:'public-feed',region:'global',status:'valid'}],cursors:{}},errors:[],complete:true} : await new DiscoveryManager({cache:this.cache,http:this.http,signal:this.signal,report:this.report,now:this.now,...this.discoveryOptions}).ensure(provider);
     const inventory = discovery.inventory;
     stats.errors.push(...discovery.errors);
     const fingerprint = inventoryFingerprint(inventory), key = searchCacheKey(options,provider.name);
@@ -66,7 +66,7 @@ export class CollectionManager {
             for (const job of updated.jobs) jobs.set(job.id,job);
             updated.jobs = [...jobs.values()];updated.revision = stableKey(updated.jobs);
           }
-          record = {data:updated,updatedAt:new Date(this.now()).toISOString(),expiresAt:new Date(this.now() + CACHE_TTL.postings).toISOString()};dirty = true;
+          record = {data:updated,updatedAt:new Date(this.now()).toISOString(),expiresAt:new Date(this.now() + (provider.cacheTtl || CACHE_TTL.postings)).toISOString()};dirty = true;
           changes.push({...board,status:'valid',lastJobFetchAt:new Date(this.now()).toISOString(),lastValidatedAt:new Date(this.now()).toISOString(),validationAttemptAt:new Date(this.now()).toISOString(),retryAt:boardRetryAt});
           if (!outcome.complete) stats.errors.push(`${provider.name}: ${board.id}: partial board (${outcome.reason || 'pagination incomplete'}).`);
         } catch (error) {
@@ -128,7 +128,7 @@ export class CollectionManager {
       this.report(provider.name,`fetching jobs: ${stats.boardsVisited} / ${boards.length} boards`);
     },{signal:this.signal});
     if (stats.detailRequests >= this.maxEnrichments) stats.errors.push(`${provider.name}: detail request budget reached; unmatched unknown attributes remain excluded.`);
-    if (changes.length) {
+    if (changes.length && provider.kind !== 'feed') {
       try {await this.cache.update('inventory',provider.name,current => mergeInventory(current,{...inventory,boards:changes}));}
       catch (error) {if (error.name === 'AbortError') throw error;stats.errors.push(`${provider.name}: inventory cache write failed: ${error.message}`);}
     }

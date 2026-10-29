@@ -21,7 +21,7 @@ export function stableKey(value) {
   }
   return createHash('sha256').update(JSON.stringify(ordered(value))).digest('hex');
 }
-const validJobs = jobs => Array.isArray(jobs) && jobs.length <= 50000 && jobs.every(job => job && ['Greenhouse','Lever','Ashby'].includes(job.source) && typeof job.id === 'string' && typeof job.title === 'string' && !!publicLink(job.url));
+const validJobs = jobs => Array.isArray(jobs) && jobs.length <= 50000 && jobs.every(job => job && ['Greenhouse','Lever','Ashby','SmartRecruiters','Personio','Remotive','Himalayas'].includes(job.source) && typeof job.id === 'string' && typeof job.title === 'string' && !!publicLink(job.url));
 export function validCacheRecord(record,kind,key) {
   if (!record || record.version !== 1 || record.kind !== kind || record.key !== key || !Number.isFinite(Date.parse(record.updatedAt)) || (record.expiresAt !== null && !Number.isFinite(Date.parse(record.expiresAt)))) return false;
   const data = record.data;

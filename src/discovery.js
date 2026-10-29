@@ -8,12 +8,12 @@ export const inventoryKey = provider => provider.name;
 export function extractBoard(value,provider) {
   try {
     const url = new URL(value);
-    if (!['https:','http:'].includes(url.protocol) || url.username || url.password || url.port || !provider.domains.includes(url.hostname)) return null;
+    if (!['https:','http:'].includes(url.protocol) || url.username || url.password || url.port || !provider.domains.some(domain => domain.startsWith('*.') ? url.hostname.endsWith(domain.slice(1)) && url.hostname.split('.').length === domain.split('.').length : domain === url.hostname)) return null;
     const first = url.pathname.split('/').filter(Boolean)[0];
-    const id = provider.name === 'Greenhouse' && first === 'embed'
+    const id = provider.name === 'Personio' ? url.hostname.split('.')[0] : provider.name === 'Greenhouse' && first === 'embed'
       ? url.searchParams.get('for') : decodeURIComponent(first || '');
     if (!validBoardId(id)) return null;
-    return {provider:provider.name,id:id.normalize('NFC'),region:url.hostname === 'jobs.eu.lever.co' ? 'eu' : 'global'};
+    return {provider:provider.name,id:id.normalize('NFC'),region:url.hostname === 'jobs.eu.lever.co' || provider.name === 'Personio' && url.hostname.endsWith('.com') ? 'eu' : 'global'};
   } catch {return null;}
 }
 export function parseCdx(body) {
@@ -59,8 +59,9 @@ export async function validateBoard(provider,board,http) {
     } catch (error) {
       if (![400,404,405,501].includes(error.status)) throw error;
     }
+    if (provider.validationFormat === 'xml') {await provider.fetchBoard(board,http);return {status:'valid',method:'GET'};}
     const data = await http.json(url);
-    const valid = provider.name === 'Lever' ? Array.isArray(data) : Array.isArray(data?.jobs);
+    const valid = provider.name === 'Lever' ? Array.isArray(data) : Array.isArray(provider.name === 'SmartRecruiters' ? data?.content : data?.jobs);
     if (!valid) throw new Error(`${provider.name}: board validation returned an invalid payload.`);
     return {status:'valid',method:'GET'};
   } catch (error) {

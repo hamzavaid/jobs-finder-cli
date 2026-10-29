@@ -12,7 +12,7 @@ import {createApiClient} from './api-http.js';
 
 function addFilters(command) {
   return command
-    .option('--website <sites...>', 'LinkedIn Indeed Glassdoor Greenhouse Lever Ashby (one or more; default: all six)', (values, prev) => [...prev, ...(Array.isArray(values) ? values : [values])], [])
+    .option('--website <sites...>', 'LinkedIn Indeed Glassdoor Greenhouse Lever Ashby SmartRecruiters Personio Remotive Himalayas (one or more; default: all enabled providers)', (values, prev) => [...prev, ...(Array.isArray(values) ? values : [values])], [])
     .option('--search <keywords>', 'Free-form job keywords (ANY occupation, e.g. chef, accountant)')
     .option('--date <duration>', 'Posted within Nh/Nd/Nw, e.g. 1d = past 24 hours')
     .option('--company <name>', 'Company name (client-side exact-normalized match)')
@@ -109,7 +109,7 @@ export async function runCli(argv = process.argv) {
     .description('Show locally saved job results without making any web requests')
     .option('--search <text>', 'Search title/company/description/location')
     .option('--company <name>', 'Restrict to company')
-    .option('--website <sites...>', 'Filter saved sources: LinkedIn Indeed Glassdoor Greenhouse Lever Ashby', (values, prev) => [...prev, ...(Array.isArray(values) ? values : [values])], [])
+    .option('--website <sites...>', 'Filter saved sources: LinkedIn Indeed Glassdoor Greenhouse Lever Ashby SmartRecruiters Personio Remotive Himalayas', (values, prev) => [...prev, ...(Array.isArray(values) ? values : [values])], [])
     .option('--limit <number>', 'Maximum output rows'))
     .action(async options => {
       validateOutputOptions(options);
@@ -123,7 +123,7 @@ export async function runCli(argv = process.argv) {
     .option('--format <format>', 'json | jsonl | csv', 'csv')
     .option('--search <text>', 'Search title/company/description/location')
     .option('--company <name>', 'Restrict to company')
-    .option('--website <sites...>', 'Filter saved sources: LinkedIn Indeed Glassdoor Greenhouse Lever Ashby', (values, prev) => [...prev, ...(Array.isArray(values) ? values : [values])], [])
+    .option('--website <sites...>', 'Filter saved sources: LinkedIn Indeed Glassdoor Greenhouse Lever Ashby SmartRecruiters Personio Remotive Himalayas', (values, prev) => [...prev, ...(Array.isArray(values) ? values : [values])], [])
     .action(async options => {
       if (!['json', 'jsonl', 'csv'].includes(options.format)) throw new Error('Export format must be json, jsonl, or csv.');
       const jobs = filterSaved(await savedJobs(), options);
@@ -143,7 +143,7 @@ export async function runCli(argv = process.argv) {
     .action(raw => {
       const opts = normalizeOptions({...raw, limit: 1, pages: 1});
       for (const site of opts.websites) {
-        if (providers[site].kind === 'ats') eprint(`${site}: company-specific URLs are discovered automatically by jobs find; no global search URL exists.`);
+        if (providers[site].kind && ['ats','feed'].includes(providers[site].kind)) eprint(`${site}: company-specific URLs are discovered automatically by jobs find; no global search URL exists.`);
         else process.stdout.write(providers[site].searchUrl(opts,0) + '\n');
       }
     });
@@ -152,7 +152,7 @@ export async function runCli(argv = process.argv) {
     .description('Display runtime/store info; optionally probe selected public search pages')
     .option('--probe', 'Probe public pages/APIs; ATS board discovery is automatic and bounded')
     .option('--search <keywords>', 'Keywords for --probe', 'chef')
-    .option('--website <sites...>', 'LinkedIn Indeed Glassdoor Greenhouse Lever Ashby; default: all six', (values, prev) => [...prev, ...(Array.isArray(values) ? values : [values])], [])
+    .option('--website <sites...>', 'LinkedIn Indeed Glassdoor Greenhouse Lever Ashby SmartRecruiters Personio Remotive Himalayas; default: all enabled providers', (values, prev) => [...prev, ...(Array.isArray(values) ? values : [values])], [])
     .action(async options => {
       const sites = normalizeWebsites(options.website);
       const info = {node:process.version, database:defaultDbPath(), saved:(await savedJobs()).length, websites:sites, onlineProbe:'skipped'};
@@ -163,7 +163,7 @@ export async function runCli(argv = process.argv) {
         for (const site of sites) {
           const provider = providers[site];
           try {
-            if (provider.kind === 'ats') {
+            if (provider.kind && ['ats','feed'].includes(providers[site].kind)) {
               const manager = new CollectionManager({http:createApiClient({retries:0}),maxBoards:1,discoveryOptions:{maxPages:1,maxValidations:1}});
               const {jobs,stats} = await manager.find(provider,{...opt,websites:[site]});
               info.onlineProbe[site] = {status:stats.complete ? 'ok' : 'partial',jobs:jobs.length,boards:stats.boardsVisited,warnings:stats.errors.slice(0,3)};

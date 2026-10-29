@@ -9,11 +9,15 @@ export function assertApiUrl(value) {
     'api.lever.co':/^\/v0\/postings\/[^/]+(?:\/[^/]+)?$/,
     'api.eu.lever.co':/^\/v0\/postings\/[^/]+(?:\/[^/]+)?$/,
     'api.ashbyhq.com':/^\/posting-api\/job-board\/[^/]+$/,
+    'api.smartrecruiters.com':/^\/v1\/companies\/[^/]+\/postings(?:\/[\w-]+)?$/,
+    'himalayas.app':/^\/jobs\/api$/,
+    'remotive.com':/^\/api\/remote-jobs$/,
     'web.archive.org':/^\/cdx\/search\/cdx$/,
     'index.commoncrawl.org':/^\/(?:collinfo\.json|CC-MAIN-\d{4}-\d{2}-index)$/,
     'urlscan.io':/^\/api\/v1\/search\/$/
   };
-  if (url.protocol !== 'https:' || url.port || url.username || url.password || !Object.hasOwn(allowed,url.hostname) || !allowed[url.hostname].test(url.pathname) || /%2f|%5c|%00|%25/i.test(url.pathname)) throw new Error('Refusing an untrusted ATS/index request URL.');
+  const personio = /^[a-z\d-]+\.jobs\.personio\.(?:de|com)$/.test(url.hostname) && url.pathname === '/xml';
+  if (url.protocol !== 'https:' || url.port || url.username || url.password || (!personio && (!Object.hasOwn(allowed,url.hostname) || !allowed[url.hostname].test(url.pathname))) || /%2f|%5c|%00|%25/i.test(url.pathname)) throw new Error('Refusing an untrusted ATS/index request URL.');
   return url;
 }
 export function retryAfterMs(value,now = Date.now()) {

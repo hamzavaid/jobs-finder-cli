@@ -11,3 +11,11 @@ export function extractPublicLinks(body,{base,maxLinks=5000}={}) {
 export function employerCandidate(board,{url,method,employer,now=Date.now()}={}) {
  const timestamp=new Date(now).toISOString();return {...board,tenant:board.id,discoveredUrl:url||null,discoveryMethod:method||'unknown',observedEmployer:employer||null,firstSeenAt:timestamp,lastSeenAt:timestamp,status:'pending'};
 }
+
+/** Known public list tables: application cells only; skip promotions and closed rows. */
+export function extractJobListLeads(body,{base}={}) {
+ const $=load(body||''),links=new Set();
+ $('table tbody tr').each((_,row)=>{const cells=$(row).find('td');if(cells.length<4||$(row).text().includes('??'))return;for(const link of extractPublicLinks($(cells[3]).html(),{base}))links.add(link);});
+ for(const line of String(body||'').split('\n'))if(line.trim().startsWith('|')&&!line.includes('??'))for(const link of extractPublicLinks(line,{base}))links.add(link);
+ return [...links].slice(0,5000);
+}

@@ -17,6 +17,6 @@ test('generic transport rejects rebinding/private DNS at connection time',async(
  const http=createPublicHttp({lookup:(host,options,cb)=>cb(null,[{address:'127.0.0.1',family:4}])});await assert.rejects(http.get('https://safe-looking.example/job'),/Private or reserved DNS/);
 });
 test('GitHub list adapter accepts only resolved complete postings and preserves provenance',async()=>{
- const result=await githubProvider.fetchBoard({}, {publicLists:async()=>({documents:[{url:'https://github.com/list',body:'[apply](https://employer.example/jobs/1)'}],errors:[]})},{resolver:{resolve:async()=>({status:'complete',job:{source:'Employer',id:'1',title:'Chef',company:'Kitchen',url:'https://employer.example/jobs/1',description:'Prepare meals'}})}});
+ const result=await githubProvider.fetchBoard({}, {publicLists:async()=>({documents:[{url:'https://github.com/list',body:'| Employer | Chef | Boston | [apply](https://employer.example/jobs/1) | 1d |'}],errors:[]})},{resolver:{resolve:async()=>({status:'complete',job:{source:'Employer',id:'1',title:'Chef',company:'Kitchen',url:'https://employer.example/jobs/1',description:'Prepare meals'}})}});
  assert.equal(result.jobs[0].source,'GitHub');assert.equal(result.jobs[0].authoritativeSource,'Employer');assert.equal(result.complete,false);
 });

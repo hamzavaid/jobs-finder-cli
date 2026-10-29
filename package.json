@@ -11,7 +11,8 @@
     "start": "node ./bin/jobs.js",
     "test": "node --test",
     "lint": "node scripts/check-syntax.js",
-    "test:live": "node scripts/live-smoke.js"
+    "test:live": "node scripts/live-smoke.js",
+    "benchmark": "node scripts/benchmark.js"
   },
   "engines": {
     "node": ">=20"

@@ -63,7 +63,7 @@ export class CollectionManager {
           const outcome = await provider.fetchBoard(board,this.http,{pages:options.pages,content:contentNeeded,cache:this.cache,signal:this.signal});
           const boardRetryAt = outcome.errorStatus ? outcome.retryAt || new Date(this.now() + 15 * 60000).toISOString() : null;
           if ([401,403,429].includes(outcome.errorStatus)) {providerBlocked = true;inventory.providerRetryAt = boardRetryAt;}
-          stats.pages += outcome.pages;stats.resolutionAttempts = (stats.resolutionAttempts || 0) + (outcome.resolutionAttempts || 0);stats.resolutionSuccesses = (stats.resolutionSuccesses || 0) + (outcome.resolutionSuccesses || 0);
+          stats.schemaRejected = (stats.schemaRejected || 0) + (outcome.rejected || 0);stats.pages += outcome.pages;stats.resolutionAttempts = (stats.resolutionAttempts || 0) + (outcome.resolutionAttempts || 0);stats.resolutionSuccesses = (stats.resolutionSuccesses || 0) + (outcome.resolutionSuccesses || 0);
           const fetchedAt = new Date(this.now()).toISOString();
           const updated = {parserVersion:PARSER_VERSION,provider:provider.name,board,jobs:outcome.jobs.map(job => ({...preserveEnrichment(cached?.data.jobs.find(old => old.id === job.id),job),lastObservedAt:fetchedAt})),lastSuccessfulFetchAt:outcome.complete ? fetchedAt : cached?.data.lastSuccessfulFetchAt || cached?.updatedAt || fetchedAt,complete:outcome.complete,pages:outcome.pages,content:contentNeeded,
             revision:postingRevision(outcome.jobs)};
@@ -105,7 +105,7 @@ export class CollectionManager {
       const enriched = [];
       for (let job of record.data.jobs) {
         if (stats.cardsSeen && stats.cardsSeen % 512 === 0) {await new Promise(resolve => setImmediate(resolve));this.signal?.throwIfAborted();}
-        stats.cardsSeen++;
+        stats.cardsSeen++;stats[job.descriptionCompleteness === 'complete' ? 'completePostings' : 'incompletePostings'] = (stats[job.descriptionCompleteness === 'complete' ? 'completePostings' : 'incompletePostings'] || 0) + 1;
         if (job.lastObservedAt && this.now() - Date.parse(job.lastObservedAt) > CACHE_TTL.stale) continue;
         const initial = engine.evaluate(job);
         const needsContent = initial.needsEnrichment || options.details && job.descriptionCompleteness !== 'complete';
@@ -116,7 +116,7 @@ export class CollectionManager {
             catch (error) {if (error.name === 'AbortError') throw error;stats.errors.push(`${provider.name}: incomplete enrichment ${job.providerJobId}: ${error.message}`);job = {...job,resolutionStatus:'incomplete'};}
           }
         }
-        if (needsContent && !engine.keywords(job) && job.descriptionCompleteness !== 'complete') stats.errors.push(`${provider.name}: incomplete keyword evidence for ${job.id}; not classified as irrelevant.`);
+        if (needsContent && !engine.keywords(job) && job.descriptionCompleteness !== 'complete') stats.incompleteEvidence = (stats.incompleteEvidence || 0) + 1;
         enriched.push(job);
         const decision = engine.evaluate(job);
         if (!decision.match) {stats.rejected++;if (decision.unknowns.length) stats.unknownExcluded++;continue;}
@@ -143,6 +143,7 @@ export class CollectionManager {
       };
       if (this.cache.coordinateRefresh) await this.cache.coordinateRefresh(boardCacheKey,collect,() => stats.errors.push(`${provider.name}: board refresh active in another process; using available cache.`));else await collect();
     },{signal:this.signal});
+    if (stats.incompleteEvidence) stats.errors.push(`${provider.name}: ${stats.incompleteEvidence} postings lacked complete keyword evidence; coverage is partial.`);
     stats.boardsRefreshed = refreshes;stats.boardsSkipped = boards.length-stats.boardsVisited;stats.boardsBlocked = providerBlocked ? stats.boardsSkipped : 0;
     if (stats.detailRequests >= this.maxEnrichments) stats.errors.push(`${provider.name}: detail request budget reached; unmatched unknown attributes remain excluded.`);
     if (changes.length && provider.kind !== 'feed') {

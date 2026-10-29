@@ -1,3 +1,5 @@
+import {pipelineSummary} from './pipeline-metrics.js';
+import {PARSER_VERSION,JOB_SCHEMA_VERSION} from './schema.js';
 import {Command} from 'commander';
 import {normalizeOptions, normalizeCompany, validateOutputOptions, normalizeWebsites} from './filters.js';
 import {createHttpClient} from './http.js';
@@ -78,6 +80,7 @@ export async function runCli(argv = process.argv) {
       const content = serializeJobs(jobs, options.format);
       await emit(content, options.output);
       if (options.output) eprint(`Wrote ${jobs.length} jobs to ${options.output}`);
+      eprint(pipelineSummary(stats));
       if (stats.exactCacheHits) eprint(`Reused cached search results for ${stats.exactCacheHits} provider(s).`);
       eprint(`Scanned ${stats.cardsSeen} cards across ${stats.pages} page(s) on ${options.websites.join(', ')}; ${jobs.length} accepted, ${stats.rejected} excluded.`);
       for (const issue of stats.errors.slice(0,8)) eprint(`WARNING: ${issue}`);
@@ -155,7 +158,7 @@ export async function runCli(argv = process.argv) {
     .option('--website <sites...>', 'LinkedIn Indeed Glassdoor Greenhouse Lever Ashby SmartRecruiters Personio Remotive Himalayas GitHub (optional); default: all enabled providers', (values, prev) => [...prev, ...(Array.isArray(values) ? values : [values])], [])
     .action(async options => {
       const sites = normalizeWebsites(options.website);
-      const info = {node:process.version, database:defaultDbPath(), saved:(await savedJobs()).length, websites:sites, onlineProbe:'skipped'};
+      const info = {pipeline:{schemaVersion:JOB_SCHEMA_VERSION,parserVersion:PARSER_VERSION,providers:Object.keys(providers),maxBoardRefreshes:64,maxEnrichments:40},node:process.version, database:defaultDbPath(), saved:(await savedJobs()).length, websites:sites, onlineProbe:'skipped'};
       if (options.probe) {
         const opt = normalizeOptions({search:options.search,website:sites,limit:1,pages:1});
         const http = createHttpClient({retries:0});

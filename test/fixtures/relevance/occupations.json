@@ -1,0 +1,29 @@
+{
+ "labelStatus":"Synthetic provisional relevance labels authored for regression checks; not human-validated ground truth.",
+ "jobs":[
+  {"id":"s1","title":"Software Engineer","description":"Build applications."},
+  {"id":"s2","title":"Software Engineering Intern","description":"Develop applications."},
+  {"id":"s3","title":"Applications Developer","description":"Software development duties."},
+  {"id":"s4","title":"Java Engineer","description":"Enterprise development."},
+  {"id":"s5","title":"JavaScript Engineer","description":"Web development."},
+  {"id":"n1","title":"Registered Nurse","description":"Clinical patient care."},
+  {"id":"n2","title":"RN","description":"Clinical nursing care."},
+  {"id":"a1","title":"Accountant","description":"Maintain financial records."},
+  {"id":"a2","title":"Certified Public Accountant","description":"Financial reporting."},
+  {"id":"c1","title":"Pastry Chef","description":"Prepare pastry."},
+  {"id":"c2","title":"Executive Chef","description":"Manage a kitchen."},
+  {"id":"x1","title":"Chief Accountant","description":"Manage finance."},
+  {"id":"x2","title":"C++ Developer","description":"Native systems."},
+  {"id":"x3","title":"C# Developer","description":"Managed applications."},
+  {"id":"x4","title":".NET Developer","description":null},
+  {"id":"x5","title":"Teacher","description":"Teach mathematics."}
+ ],
+ "queries":[
+  {"query":"Software Engineer","grades":{"s1":3,"s2":3}},
+  {"query":"RN","grades":{"n1":3,"n2":3}},
+  {"query":"Chef","grades":{"c1":3,"c2":3}},
+  {"query":"Java","grades":{"s4":3}},
+  {"query":"C++","grades":{"x2":3}},
+  {"query":"CPA","grades":{"a2":3}}
+ ]
+}

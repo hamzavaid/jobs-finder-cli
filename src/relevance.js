@@ -19,7 +19,8 @@ export function relevance(job,query,{now = Date.now(),weights = DEFAULT_WEIGHTS,
   const uncertain = missingTerms.length > 0 && !complete;
   const coverage = tokens => terms.length ? terms.filter(t => tokens.includes(t)).length / terms.length : 1;
   const titleRaw = tokenize(job.title), queryRaw = tokenize(query);
-  const signals = {phrase:contains(titleRaw,queryRaw) ? 1 : 0,title:coverage(title),aliases:coverage(title)};
+  const signals = {phrase:contains(titleRaw,queryRaw) ? 1 : 0,title:coverage(title)};
+  if ([...titleRaw,...queryRaw].some(token => Object.hasOwn(aliases,token))) signals.aliases = coverage(title);
   if (job.description) signals.description = coverage(description);
   const date = job.datePrecision === 'instant' ? Date.parse(job.postedAt) : NaN;
   if (Number.isFinite(date) && date <= now) signals.freshness = Math.max(0,1-(now-date)/(30*86400000));

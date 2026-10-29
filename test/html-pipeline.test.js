@@ -69,7 +69,7 @@ test('details are reused across queries and blocks stop detail work immediately'
  const http={get:async url=>{if(url.endsWith('/robots.txt'))return 'User-agent: *\nAllow: /';if(url.includes('/viewjob')){details++;if(blocked)throw new AccessError('HTTP 403',403);return '<div id="jobDescriptionText">Prepare food</div>';}return page;}};
  const first=await findIndeedJobs(options({details:true}),http,{cache});assert.equal(first.jobs[0].description,'Prepare food');
  const second=await findIndeedJobs(options({details:true,search:'pastry'}),http,{cache});assert.equal(details,1);assert.equal(second.stats.detailCacheHits,1);
- blocked=true;await assert.rejects(findIndeedJobs(options({details:true}),http,{cache:false}),error=>error.providerStatus==='blocked');assert.equal(details,2);
+ blocked=true;const partial=await findIndeedJobs(options({details:true}),http,{cache:false});assert.equal(partial.stats.status,'partial');assert.equal(partial.stats.stopStatus,'blocked');assert.equal(partial.jobs[0].detailsFetched,false);assert.equal(partial.jobs[0].resolutionStatus,'incomplete');assert.equal(details,2);
 }));
 test('later page denial, repeated links, unsafe pagination and cancellation preserve honest outcomes',async()=> {
  const page=await fixture(),next='<a rel="next" href="/jobs?start=10">Next</a>';let pages=0;

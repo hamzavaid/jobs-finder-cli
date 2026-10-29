@@ -119,7 +119,11 @@ async function collectPages(provider, options, http, onProgress, context) {
               await detailCache?.put('html-detail',detailKey,{parserVersion:PARSER_VERSION,job},{ttl:HTML_TTL.detail});
             } catch(error) {
               if(error.name==='AbortError'||context.signal?.aborted) throw error;
-              if(['blocked','restricted','rate_limited'].includes(failureStatus(error))) throw error;
+              if(['blocked','restricted','rate_limited'].includes(failureStatus(error))) {
+                const summary=normalizeJob({...card,source:provider.name,resolutionStatus:'incomplete'});
+                if(evaluateJob(summary,evaluation,now()).match && validateJob(summary).valid)results.set(summary.id,summary);
+                throw error;
+              }
               stats.errors.push(`${provider.name}: incomplete detail ${card.id}: ${error.message}`);job={...card,resolutionStatus:'incomplete'};
             }
           } else {stats.complete=false;if(!stats.errors.some(error=>error.includes('detail budget')))stats.errors.push(`${provider.name}: detail budget reached.`);}

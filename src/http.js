@@ -40,7 +40,12 @@ export function createHttpClient({delayMs = 1200, timeoutMs = 15000, retries = 2
             signal:controller.signal, redirect:'error'
           });
           if (response.url && /\/(?:authwall|checkpoint|login|signin|member\/profile\/login)(?:[/?]|$)/i.test(new URL(response.url).pathname)) throw new AccessError(`${host}: login or access checkpoint required.`);
-          if ([401,403,429,999].includes(response.status)) throw new AccessError(`${host} returned HTTP ${response.status}; access is restricted. Use the official website.`, response.status);
+          if ([401,403,429,999].includes(response.status)) {
+            const error=new AccessError(`${host} returned HTTP ${response.status}; access is restricted. Use the official website.`, response.status);
+            const retry=response.headers?.get('retry-after');
+            error.retryAt=retry && /^\d+$/.test(retry)?now()+Number(retry)*1000:Date.parse(retry);
+            throw error;
+          }
           if (!response.ok) throw new AccessError(`HTTP ${response.status} from ${host}.`, response.status);
           let body;
           if (response.body?.getReader) {

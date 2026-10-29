@@ -13,7 +13,8 @@
     "lint": "node scripts/check-syntax.js",
     "test:live": "node scripts/live-smoke.js",
     "benchmark": "node scripts/benchmark.js",
-    "benchmark:cache": "node scripts/cache-performance.js"
+    "benchmark:cache": "node scripts/cache-performance.js",
+    "benchmark:html": "node scripts/html-performance.js"
   },
   "engines": {
     "node": ">=20"

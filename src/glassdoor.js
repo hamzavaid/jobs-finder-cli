@@ -1,8 +1,8 @@
 /** Glassdoor public HTML only. No GraphQL, cookies, login or browser impersonation. */
 import {load} from 'cheerio';
-import robotsParser from 'robots-parser';
+import {policyHttp} from './provider-access.js';
 import {normalizeWorkplace} from './filters.js';
-import {assertPublicHtml, AccessError} from './http.js';
+import {assertPublicHtml} from './http.js';
 import {clean, normalizeJob, structuredJobs, structuredFields, mergeKnown} from './schema.js';
 import {searchProvider} from './provider-search.js';
 
@@ -31,7 +31,7 @@ export function makeGlassdoorUrl(options) {
 }
 export function glassdoorDetailUrl(id, job = {}) {
   const url = job.sourceUrl || job.url;
-  if (url) {glassdoorJobId(url); return publicUrl(url).toString();}
+  if (url) {if(glassdoorJobId(url)!==glassdoorJobId(id))throw new Error('Glassdoor: detail URL belongs to a different posting.');return publicUrl(url).toString();}
   return `${origin}/job-listing/JV.htm?jl=${glassdoorJobId(id)}`;
 }
 function fromStructured(ld) {
@@ -41,7 +41,7 @@ function fromStructured(ld) {
   try {id = glassdoorJobId(rawUrl); url = publicUrl(rawUrl).toString();} catch {return null;}
   const fields = structuredFields(ld);
   if (!fields.title || !fields.company) return null;
-  return normalizeJob({...fields, source:'Glassdoor', id, url, sourceUrl:url});
+  return normalizeJob({...fields, source:'Glassdoor', id, url, sourceUrl:url,salarySource:fields.salary?'employer-provided':null,detailsFetched:!!fields.description});
 }
 export function parseGlassdoorCards(html) {
   assertPublicHtml(html);
@@ -58,12 +58,13 @@ export function parseGlassdoorCards(html) {
     const workplace = read('[data-test="workplace-type"]');
     const time = root.find('time[datetime]').first().attr('datetime');
     const posted = structuredFields({datePosted:time});
+    const salary=read('[data-test="detailSalary"], [data-test="salary-estimate"], [class*="JobCard_salaryEstimate"]');
     rows.push(normalizeJob({source:'Glassdoor',id,url,sourceUrl:url,title,company,location,
       postedAt:posted.postedAt,datePrecision:posted.datePrecision,
       postedText:read('[data-test="job-age"], [class*="JobCard_listingAge"]'),
       workplace:normalizeWorkplace(workplace || location),
       employmentType:read('[data-test="job-type"]'),seniorityLevel:read('[data-test="seniority-level"]'),
-      salary:read('[data-test="detailSalary"], [data-test="salary-estimate"], [class*="JobCard_salaryEstimate"]'),
+      salary,salarySource:salary?(/Glassdoor est/i.test(salary)?'glassdoor-estimate':/employer/i.test(salary)?'employer-provided':'source-displayed'):null,
       description:read('[data-test="job-snippet"], [class*="JobCard_jobDescriptionSnippet"]')}));
   });
   const unique = new Map();
@@ -96,17 +97,7 @@ export function parseGlassdoorDetail(html, fallback = {}) {
     seniorityLevel:fields.seniorityLevel || read('[data-test="seniority-level"]'),
     source:'Glassdoor', detailsFetched:true, fetchedAt:new Date().toISOString()}));
 }
-export async function glassdoorHttp(http) {
-  const robotsUrl = `${origin}/robots.txt`;
-  const body = await http.get(robotsUrl);
-  if (!/^\s*user-agent\s*:/im.test(body) || /<html/i.test(body)) throw new AccessError('Glassdoor: robots.txt could not be verified; stopped without requesting job pages.');
-  const rules = robotsParser(robotsUrl, body);
-  return {get:async value => {
-    const url = publicUrl(value).toString();
-    if (rules.isAllowed(url, 'jobs-cli') === false) throw new AccessError(`Glassdoor: robots.txt disallows ${new URL(url).pathname}; public pagination or detail access is restricted.`);
-    return http.get(url);
-  }};
-}
+export async function glassdoorHttp(http,context) {return policyHttp(http,origin,context);}
 function nextPage(html) {
   const $ = load(html);
   const href = $('a[rel="next"], a[data-test="pagination-next"]').first().attr('href');
@@ -119,9 +110,10 @@ function nextPage(html) {
   return null;
 }
 export const glassdoorProvider = {
+  accessPolicy:'permission-required',
   name:'Glassdoor', searchUrl:makeGlassdoorUrl, parseCards:parseGlassdoorCards,
   parseDetail:parseGlassdoorDetail, jobId:glassdoorJobId, detailUrl:glassdoorDetailUrl,
   facets:() => [], prepareHttp:glassdoorHttp, nextPage,
   emptyPattern:/no (?:matching )?jobs found|no results found|data-test=["']no-results["']/i
 };
-export function findGlassdoorJobs(options, http) {return searchProvider(glassdoorProvider, options, http);}
+export function findGlassdoorJobs(options, http,context) {return searchProvider(glassdoorProvider, options, http,undefined,context);}

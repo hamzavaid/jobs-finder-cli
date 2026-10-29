@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
-import {findGlassdoorJobs, parseGlassdoorCards, parseGlassdoorDetail, makeGlassdoorUrl, glassdoorJobId} from '../src/glassdoor.js';
+import {findGlassdoorJobs as actualFind, parseGlassdoorCards, parseGlassdoorDetail, makeGlassdoorUrl, glassdoorJobId} from '../src/glassdoor.js';
 import {normalizeOptions, evaluateJob} from '../src/filters.js';
 const fixture = name => readFile(new URL(`./fixtures/${name}`,import.meta.url),'utf8');
 const allow = 'User-agent: *\nDisallow: /api/\n';
@@ -53,3 +53,11 @@ test('Glassdoor detail never merges a different posting and unavailable crawl po
   assert.throws(() => parseGlassdoorDetail('<script type="application/ld+json">{"@type":"JobPosting","title":"Nurse","url":"https://www.glassdoor.com/job-listing/nurse.htm?jl=100000000003"}</script>',{id:'100000000004'}),/different posting/);
   await assert.rejects(findGlassdoorJobs(options({pages:1}),{get:async () => '<html>robots page unavailable</html>'}),/robots.txt could not be verified/);
 });
+
+test('Glassdoor detail URL identity must agree and salary attribution is retained',async()=> {
+ const {glassdoorDetailUrl}=await import('../src/glassdoor.js');
+ assert.throws(()=>glassdoorDetailUrl('100000000001',{url:'https://www.glassdoor.com/job-listing/a.htm?jl=100000000002'}),/different posting/);
+ const jobs=parseGlassdoorCards(await fixture('glassdoor-dom.html'));assert.equal(jobs[1].salarySource,'glassdoor-estimate');
+});
+
+function findGlassdoorJobs(options,http) {return actualFind(options,http,{cache:false,accessPolicy:{Glassdoor:{mode:'public-html',evidence:'synthetic offline fixtures'}}});}

@@ -5,7 +5,7 @@ import {createHash,randomUUID} from 'node:crypto';
 import {setTimeout as sleep} from 'node:timers/promises';
 import {validBoardId,publicLink} from './ats/shared.js';
 
-const DAY = 86400000, kinds = new Set(['inventory','postings','search','resolution','manifest','maintenance']);
+const DAY = 86400000, kinds = new Set(['inventory','postings','search','resolution','manifest','maintenance','html-policy','html-search','html-detail']);
 export const CACHE_TTL = Object.freeze({postings:20 * 60000,search:10 * 60000,stale:7 * DAY,partialSearch:3 * 60000,prune:DAY,enrichmentTransient:5 * 60000,enrichmentStructural:DAY});
 export function defaultCacheDir(env = process.env,platform = process.platform,home = homedir()) {
   if (env.JOBS_CACHE_DIR) return env.JOBS_CACHE_DIR;
@@ -27,6 +27,9 @@ export function validCacheRecord(record,kind,key) {
   const data = record.data;
   if (!data || typeof data !== 'object') return false;
   if (kind !== 'inventory' && record.expiresAt === null) return false;
+  if (kind === 'html-policy') return typeof data.body === 'string' || typeof data.status === 'string' && Number.isFinite(data.retryAt);
+  if (kind === 'html-detail') return Number.isInteger(data.parserVersion) && data.job && ['Indeed','Glassdoor'].includes(data.job.source) && typeof data.job.id === 'string' && !!publicLink(data.job.url);
+  if (kind === 'html-search') return Number.isInteger(data.parserVersion) && Array.isArray(data.jobs) && data.jobs.every(job=>job && ['Indeed','Glassdoor'].includes(job.source) && typeof job.id === 'string' && typeof job.title === 'string' && !!publicLink(job.url)) && data.stats && Array.isArray(data.stats.errors) && ['ok','empty','partial'].includes(data.stats.status);
   if (kind === 'maintenance') return Number.isFinite(Date.parse(data.lastPrunedAt));
   if (kind === 'manifest') return typeof data.revision === 'string' && typeof data.pending === 'boolean';
   if (kind === 'resolution') return ['complete','incomplete','blocked','unsupported','failed'].includes(data.status) && (data.job === null || data.job && typeof data.job.title === 'string' && !!publicLink(data.job.url));
@@ -224,7 +227,11 @@ export class CacheManager {
         if (!/^[a-f0-9]{64}\.json(?:\.(?:corrupt|tmp)-[\w-]+)?$/.test(file)) continue;
         const path = join(directory,file), info = await stat(path).catch(() => null);
         if (!info || this.now() - info.mtimeMs < DAY) continue;
-        if (/\.(?:tmp|corrupt)-/.test(file) || (['search','resolution'].includes(kind) && this.now() - info.mtimeMs > DAY) || (['postings','manifest'].includes(kind) && this.now() - info.mtimeMs > CACHE_TTL.stale)) {
+        let expiredHtml=false;
+        if(kind.startsWith('html-') && file.endsWith('.json')) {
+          try {expiredHtml=Date.parse(JSON.parse(await readFile(path,'utf8')).expiresAt)<=this.now();}catch {expiredHtml=true;}
+        }
+        if (expiredHtml || /\.(?:tmp|corrupt)-/.test(file) || (['search','resolution'].includes(kind) && this.now() - info.mtimeMs > DAY) || (['postings','manifest'].includes(kind) && this.now() - info.mtimeMs > CACHE_TTL.stale)) {
           let commit,commitPath,lock;
           try {
             if(kind==='postings' && file.endsWith('.json')) {

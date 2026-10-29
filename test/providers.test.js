@@ -4,7 +4,7 @@ import {readFile, mkdtemp, rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {normalizeOptions} from '../src/filters.js';
-import {findJobs} from '../src/search.js';
+import {findJobs as actualFind} from '../src/search.js';
 import {saveJobs, savedJobs, statsForSaved} from '../src/store.js';
 
 test('website defaults to six; accepts multiple values and mixed case', () => {
@@ -38,3 +38,5 @@ test('saved IDs are namespaced by site', async () => {
     assert.deepEqual((await statsForSaved(path)).byWebsite, {LinkedIn:1, Indeed:1});
   } finally {await rm(join(path,'..'),{recursive:true, force:true});}
 });
+
+function findJobs(options,http) {return actualFind(options,{get:url=>url.endsWith('/robots.txt') && url.includes('indeed.com')?Promise.resolve('User-agent: *\nAllow: /'):http.get(url)},{cache:false,accessPolicy:{Glassdoor:{mode:'public-html',evidence:'synthetic offline fixtures'}}});}

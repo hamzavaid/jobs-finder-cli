@@ -18,7 +18,7 @@ export function cacheDiagnostics(stats,jobsReturned) {
  const m=stats.metrics || {},t=stats.timings || {};
  lines.push(`Cache reuse: ${m.inventoryCacheHits || 0} inventories; ${m.postingSnapshotHits || 0} posting snapshots; ${m.detailCacheHits || 0} complete descriptions; ${m.detailCooldownHits || 0} detail cooldowns.`);
  lines.push(`Enrichment: bulk ${m.bulkAttempts || 0} attempted / ${m.bulkSuccesses || 0} succeeded / ${m.bulkFailures || 0} failed; ${m.detailRequests || 0} individual attempts.`);
- if(m.httpRequests!=null)lines.push(`Network requests: ${m.httpRequests} (API/index transport).`);
+ if(m.httpRequests!=null)lines.push(`Network requests: ${m.httpRequests} (API/index transport); ${m.htmlRequests || 0} public HTML requests.`);
  lines.push(`Jobs returned: ${jobsReturned}; ${m.acceptedAfterFiltering || 0} passed local filtering this run.`);
  lines.push(`Stage time (ms): discovery ${Math.round(t.discoveryMs || 0)}, collection ${Math.round(t.collectionMs || 0)}, enrichment ${Math.round(t.enrichmentMs || 0)}, filtering ${Math.round(t.filteringMs || 0)}, cache reads ${Math.round(t.cacheReadMs || 0)}, cache writes ${Math.round(t.cacheWriteMs || 0)}.`);
  return lines;

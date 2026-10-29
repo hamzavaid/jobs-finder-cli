@@ -24,7 +24,7 @@ test('date exact boundaries, invalid/future values and coarse Indeed buckets sta
   assert.equal(evaluateJob({postedAt:'2026-10-26T12:00:00Z',datePrecision:'instant'},options,now).match,true);
   assert.equal(evaluateJob({postedAt:'2026-10-26T11:59:59Z',datePrecision:'instant'},options,now).match,false);
   assert.equal(indeedFacets(o({date:'1h'})).includes('date'),false);
-  assert.equal(indeedFacets(o({date:'1d'})).includes('date'),true);
+  assert.equal(indeedFacets(o({date:'1d'})).includes('date'),false); // A URL parameter alone is not evidence.
   assert.equal(indeedFacets(o({date:'2d'})).includes('date'),false);
   assert.equal(evaluateJob({source:'Glassdoor',postedAt:'2026-10-27',datePrecision:'day'},options,now).match,false);
 });

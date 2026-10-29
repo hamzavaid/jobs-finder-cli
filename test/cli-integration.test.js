@@ -4,6 +4,7 @@ import {spawnSync} from 'node:child_process';
 import {mkdtemp, readFile, rm} from 'node:fs/promises';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
+import {mkdtempSync,rmSync} from 'node:fs';
 
 // Replace only fetch in an isolated process; exercise real CLI, HTTP, parsers and store.
 const bootstrap = `
@@ -19,13 +20,14 @@ globalThis.fetch = async url => {
 const {runCli} = await import('./src/cli.js');
 await runCli(['node','jobs',...process.argv.slice(1)]);
 `;
-const cli = (args, env) => spawnSync(process.execPath,['--input-type=module','-e',bootstrap,...args],{encoding:'utf8',env:{...process.env,...env},timeout:30000});
+const cli = (args, env) => {const root=mkdtempSync(join(tmpdir(),'html-cli-'));try{return spawnSync(process.execPath,['--input-type=module','-e',bootstrap,...args],{encoding:'utf8',env:{...process.env,JOBS_CACHE_DIR:root,...env},timeout:30000});}finally{rmSync(root,{recursive:true,force:true});}};
 test('find searches legacy providers, saves results, and keeps JSON stdout clean', async () => {
   const dir = await mkdtemp(join(tmpdir(),'jobs-e2e-')), path = join(dir,'db.json');
   try {
     const result = cli(['find','--website','LinkedIn','Indeed','Glassdoor','--search','chef','--pages','1','--limit','3','--delay','750','--format','json','--save'],{JOBS_DB:path});
     assert.equal(result.status,0,result.stderr);
-    assert.deepEqual(JSON.parse(result.stdout).map(job => job.source),['Glassdoor','LinkedIn','LinkedIn']);
+    assert.deepEqual(JSON.parse(result.stdout).map(job => job.source),['LinkedIn','LinkedIn','Indeed']);
+    assert.match(result.stderr,/Glassdoor: restricted/);
     assert.equal(Object.keys(JSON.parse(await readFile(path,'utf8')).jobs).length,3);
     assert.match(result.stderr,/Saved 3 jobs/);
   } finally {await rm(dir,{recursive:true,force:true});}
@@ -38,7 +40,7 @@ test('find reports a blocked provider on stderr and retains other results', () =
 test('doctor probe validates parsed cards and reports blocked access with failure exit', () => {
   const result = cli(['doctor','--probe','--website','Glassdoor'],{MOCK_BLOCK:'Glassdoor'});
   assert.equal(result.status,1,result.stderr);
-  assert.equal(JSON.parse(result.stdout).onlineProbe.Glassdoor.status,'error');
+  assert.equal(JSON.parse(result.stdout).onlineProbe.Glassdoor.status,'restricted');
 });
 test('argument errors and all-provider failure are nonzero without success output', () => {
   for (const args of [

@@ -10,6 +10,7 @@ import {greenhouseProvider} from './ats/greenhouse.js';
 import {leverProvider} from './ats/lever.js';
 import {ashbyProvider} from './ats/ashby.js';
 import {normalizeJob} from './schema.js';
+import {assertProviderAccess} from './provider-access.js';
 export class ProviderRegistry {
   constructor(adapters) {this.adapters = new Map(adapters.map(adapter => [adapter.name,adapter]));}
   get(name) {const provider = this.adapters.get(name);if (!provider) throw new Error(`Unknown provider: ${name}`);return provider;}
@@ -34,9 +35,10 @@ export function postingProvider(input, website) {
   provider.jobId(input);
   return provider;
 }
-export async function fetchProviderJob(input, website, http) {
+export async function fetchProviderJob(input, website, http,context={}) {
   const provider = postingProvider(input,website), id = provider.jobId(input);
-  if (provider.prepareHttp) http = await provider.prepareHttp(http);
+  assertProviderAccess(provider,{},context);
+  if (provider.prepareHttp) http = await provider.prepareHttp(http,context);
   const url = /^https:\/\//i.test(input) ? input : provider.name === 'LinkedIn'
     ? `https://www.linkedin.com/jobs/view/${id}/` : provider.detailUrl(id);
   const requestUrl = provider.detailUrl(id,{url});

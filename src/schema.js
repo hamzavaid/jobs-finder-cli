@@ -4,7 +4,7 @@ import {load} from 'cheerio';
 export const clean = value => String(value ?? '').replace(/\s+/g, ' ').trim();
 export const plainText = value => typeof value === 'string' ? clean(load(value).text()) || null : null;
 export const JOB_SCHEMA_VERSION = 2;
-export const PARSER_VERSION = 4;
+export const PARSER_VERSION = 5;
 export function validSourceDate(value) {
  if(typeof value!=='string'||!/^\d{4}-\d{2}-\d{2}(?:T.*(?:Z|[+-]\d{2}:?\d{2}))?$/.test(value)||!Number.isFinite(Date.parse(value)))return false;
  const day=value.slice(0,10);return new Date(Date.parse(day)).toISOString().slice(0,10)===day;
@@ -40,16 +40,18 @@ export function validateJob(job,{complete=false}={}) {
 }
 export function structuredJobs(html) {
   const $ = load(html || ''), jobs = [];
-  function visit(value) {
-    if (!value || typeof value !== 'object') return;
-    if (Array.isArray(value)) {value.forEach(visit); return;}
+  let remaining=20000;
+  function visit(value,depth=0) {
+    if (!value || typeof value !== 'object' || depth>24 || --remaining<0) return;
+    if (Array.isArray(value)) {for(const item of value.slice(0,5000))visit(item,depth+1);return;}
     if ([value['@type']].flat().includes('JobPosting')) jobs.push(value);
-    if (value['@graph']) visit(value['@graph']);
-    if (Array.isArray(value.itemListElement)) value.itemListElement.forEach(item => visit(item.item || item));
-    if (value.mainEntity) visit(value.mainEntity);
+    if (value['@graph']) visit(value['@graph'],depth+1);
+    if (Array.isArray(value.itemListElement)) value.itemListElement.slice(0,5000).forEach(item => visit(item?.item || item,depth+1));
+    if (value.mainEntity) visit(value.mainEntity,depth+1);
   }
   $('script[type="application/ld+json"]').each((_, el) => {
-    try {visit(JSON.parse($(el).html()));} catch { /* Invalid metadata is not executable. */ }
+    const text=$(el).html();if(!text || text.length>4*1024*1024)return;
+    try {visit(JSON.parse(text));} catch { /* Invalid metadata is not executable. */ }
   });
   return jobs;
 }

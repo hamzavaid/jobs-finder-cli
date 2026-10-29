@@ -71,6 +71,7 @@ export function normalizeOptions(input) {
   if (search && !tokenize(search).length) throw new Error('--search must contain a searchable word or technical term.');
   const company = String(input.company ?? '').trim();
   const location = String(input.location ?? '').trim();
+  if([search,company,location].some(value=>value.length>2000)) throw new Error('Search, company and location must each contain at most 2000 characters.');
   if (!search && !company && !location) {
     throw new Error('Provide at least one of --search, --company or --location. No default occupation is assumed.');
   }
@@ -115,7 +116,7 @@ export function evaluateJob(job, o, now = Date.now()) {
   const unknowns = [];
   const facetReliant = [];
   if (o.company && normalizeCompany(job.company) !== normalizeCompany(o.company)) failures.push('company');
-  if ((o.provider || job.source) === 'Glassdoor' && o.location) {
+  if (['Indeed','Glassdoor'].includes(o.provider || job.source) && o.location) {
     if (!job.location) unknowns.push('location');
     else if (!String(job.location).toLowerCase().includes(o.location.toLowerCase())) failures.push('location');
   }

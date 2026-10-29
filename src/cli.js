@@ -5,7 +5,8 @@ import {normalizeOptions, normalizeCompany, validateOutputOptions, normalizeWebs
 import {createHttpClient} from './http.js';
 import {findJobs} from './search.js';
 import {providers, fetchProviderJob} from './providers.js';
-import {assertSearchPage} from './provider-search.js';
+import {searchProvider} from './provider-search.js';
+import {failureStatus} from './provider-access.js';
 import {serializeJobs, emit} from './output.js';
 import {savedJobs, saveJobs, statsForSaved, defaultDbPath} from './store.js';
 import {ProgressReporter} from './progress.js';
@@ -82,6 +83,7 @@ export async function runCli(argv = process.argv) {
       if (options.output) eprint(`Wrote ${jobs.length} jobs to ${options.output}`);
       eprint(pipelineSummary(stats));
       cacheDiagnostics(stats,jobs.length).forEach(eprint);
+      for(const [site,info] of Object.entries(stats.providers)) if(info.status) eprint(`${site}: ${info.status}${info.fromCache?' (cached)':''}${info.stale?' (stale)':''}${info.error?`; ${info.error}`:''}`);
       if (stats.exactCacheHits) eprint(`Reused cached search results for ${stats.exactCacheHits} provider(s).`);
       eprint(`Scanned ${stats.cardsSeen} cards across ${stats.pages} page(s) on ${options.websites.join(', ')}; ${jobs.length} returned (result limit ${options.limit}), ${stats.rejected} excluded.`);
       for (const issue of stats.errors.slice(0,8)) eprint(`WARNING: ${issue}`);
@@ -174,13 +176,10 @@ export async function runCli(argv = process.argv) {
               info.onlineProbe[site] = {status:stats.complete ? 'ok' : 'partial',jobs:jobs.length,boards:stats.boardsVisited,warnings:stats.errors.slice(0,3)};
               continue;
             }
-            const client = provider.prepareHttp ? await provider.prepareHttp(http) : http;
-            const html = await client.get(provider.searchUrl(opt));
-            const cards = provider.parseCards(html);
-            assertSearchPage(html,cards,provider.emptyPattern,site);
-            info.onlineProbe[site] = {status:'ok',cards:cards.length};
+            const {jobs,stats}=await searchProvider(provider,opt,http);
+            info.onlineProbe[site] = {status:stats.status,jobs:jobs.length,cards:stats.cardsSeen,warnings:stats.errors};
           } catch (error) {
-            info.onlineProbe[site] = {status:'error',error:error.message};
+            info.onlineProbe[site] = {status:failureStatus(error),error:error.message};
             process.exitCode = 1;
           }
         }

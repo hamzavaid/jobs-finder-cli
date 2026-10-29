@@ -5,6 +5,7 @@ import {searchProvider} from './provider-search.js';
 import {CollectionManager} from './collection.js';
 import {createApiClient} from './api-http.js';
 import {consolidateJobs} from './dedup.js';
+import {failureStatus} from './provider-access.js';
 export {fetchJob, findLinkedInJobs} from './linkedin.js';
 
 /** Execute providers concurrently, then consolidate and globally rank candidates. */
@@ -28,11 +29,11 @@ export async function findJobs(options, http, context = {}) {
       context.report?.(site,'searching');
       const provider = providers[site];
       if (!provider) throw new Error(`Unknown provider: ${site}`);
-      const outcome = ['ats','feed'].includes(provider.kind) ? await collection.find(provider,candidateOptions) : await searchProvider(provider,candidateOptions,http);
+      const outcome = ['ats','feed'].includes(provider.kind) ? await collection.find(provider,candidateOptions) : await searchProvider(provider,candidateOptions,http,undefined,context);
       context.signal?.throwIfAborted();
       context.report?.(site,`${outcome.jobs.length} matching jobs collected`);
       return {site,outcome};
-    } catch (error) {context.report?.(site,error.name === 'AbortError' ? 'canceled' : 'provider failed');return {site,error};}
+    } catch (error) {context.report?.(site,error.name === 'AbortError' ? 'canceled' : `${failureStatus(error)}: provider failed`);return {site,error};}
   }));
   await collection?.cache.flush();
   const allExact=outcomes.filter(item=>item.outcome).length>0 && outcomes.every(item=>!item.outcome || item.outcome.stats.exactCacheHit);
@@ -42,7 +43,7 @@ export async function findJobs(options, http, context = {}) {
   context.signal?.throwIfAborted();
   for (const {site,outcome,error} of outcomes) {
     if (error) {
-      allErrors.push(error);stats.errors.push(`${site}: ${error.message}`);stats.providers[site] = {error:error.message};continue;
+      allErrors.push(error);stats.errors.push(`${site}: ${error.message}`);stats.providers[site] = {status:failureStatus(error),complete:false,error:error.message,code:error.code || (error.status?`HTTP_${error.status}`:null)};continue;
     }
     successfulProviders++;
     stats.errors.push(...(outcome.stats.errors || []));
@@ -52,7 +53,7 @@ export async function findJobs(options, http, context = {}) {
     stats.facetReliant.push(...outcome.stats.facetReliant.map(filter => `${site}:${filter}`));
     providerJobs.push({site,jobs:outcome.jobs});
   }
-  if (!successfulProviders) throw new AggregateError(allErrors, `All selected sites failed: ${stats.errors.join(' | ')}`);
+  if (!successfulProviders) {const error=new AggregateError(allErrors, `All selected sites failed: ${stats.errors.join(' | ')}`);error.providers=stats.providers;throw error;}
   const merged = providerJobs.flatMap(provider => provider.jobs);
   const duplicateHints = consolidateJobs(merged);
   stats.possibleCrossSourceDuplicates = duplicateHints.possible;stats.identityConflicts = duplicateHints.conflicts;
@@ -61,6 +62,7 @@ export async function findJobs(options, http, context = {}) {
   metrics.add('sourcesAttempted',selected.length);metrics.add('sourcesSuccessful',successfulProviders);
   for (const key of ['boardsKnown','boardsVisited','boardsSkipped','boardsRefreshed','boardsBlocked','staleBoards','cacheHits','postingSnapshotHits','exactCacheMisses','bulkAttempts','bulkSuccesses','bulkFailures','bulkCooldownHits','detailRequests','detailCacheHits','detailCooldownHits','acceptedAfterFiltering','completePostings','incompletePostings','schemaRejected','resolutionAttempts','resolutionSuccesses']) metrics.add(key,outcomes.reduce((sum,item)=>sum+(item.outcome?.stats[key]||0),0));
   if (collection?.http?.metrics) {metrics.add('httpRequests',collection.http.metrics.requests-(initialTransport.requests||0));metrics.add('httpBytes',collection.http.metrics.bytes-(initialTransport.bytes||0));}
+  metrics.add('htmlRequests',outcomes.reduce((sum,item)=>sum+(item.outcome?.stats.httpRequests || item.error?.searchStats?.httpRequests || 0),0));
   metrics.add('exactCacheHits',stats.exactCacheHits);metrics.add('inventoryCacheHits',outcomes.filter(item=>item.outcome?.stats.inventoryCacheHit).length);
   stats.timings=Object.fromEntries(['discoveryMs','collectionMs','enrichmentMs','filteringMs','cacheReadMs','cacheWriteMs'].map(key=>[key,outcomes.reduce((sum,item)=>sum+(item.outcome?.stats.timings?.[key]||0),0)]));
   if(collection?.cache.metrics){stats.timings.cacheReadMs=collection.cache.metrics.readMs-(initialCacheMetrics.readMs||0);stats.timings.cacheWriteMs=collection.cache.metrics.writeMs-(initialCacheMetrics.writeMs||0);}

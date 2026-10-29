@@ -5,8 +5,8 @@ import {spawnSync} from 'node:child_process';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {normalizeOptions} from '../src/filters.js';
-import {findJobs} from '../src/search.js';
-import {fetchProviderJob, postingProvider} from '../src/providers.js';
+import {findJobs as actualFind} from '../src/search.js';
+import {fetchProviderJob as actualFetch, postingProvider} from '../src/providers.js';
 import {saveJobs} from '../src/store.js';
 const fixture = name => readFile(new URL(`./fixtures/${name}`,import.meta.url),'utf8');
 const cli = (args, env = {}) => spawnSync(process.execPath,['bin/jobs.js',...args],{encoding:'utf8',env:{...process.env,...env}});
@@ -73,3 +73,7 @@ test('saved, export, stats and offline doctor recognize Glassdoor', async () => 
     assert.equal(doctor.status,0,doctor.stderr); assert.deepEqual(JSON.parse(doctor.stdout).websites,['Glassdoor']);
   } finally {await rm(dir,{recursive:true,force:true});}
 });
+
+function findJobs(options,http) {return actualFind(options,{get:url=>url.endsWith('/robots.txt') && url.includes('indeed.com')?Promise.resolve('User-agent: *\nAllow: /'):http.get(url)},{cache:false,accessPolicy:{Glassdoor:{mode:'public-html',evidence:'synthetic offline fixtures'}}});}
+
+function fetchProviderJob(...args) {return actualFetch(...args,{cache:false,accessPolicy:{Glassdoor:{mode:'public-html',evidence:'synthetic offline fixtures'}}});}

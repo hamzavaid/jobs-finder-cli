@@ -25,7 +25,7 @@ test('find searches legacy providers, saves results, and keeps JSON stdout clean
   try {
     const result = cli(['find','--website','LinkedIn','Indeed','Glassdoor','--search','chef','--pages','1','--limit','3','--delay','750','--format','json','--save'],{JOBS_DB:path});
     assert.equal(result.status,0,result.stderr);
-    assert.deepEqual(JSON.parse(result.stdout).map(job => job.source),['LinkedIn','Indeed','Glassdoor']);
+    assert.deepEqual(JSON.parse(result.stdout).map(job => job.source),['Glassdoor','LinkedIn','LinkedIn']);
     assert.equal(Object.keys(JSON.parse(await readFile(path,'utf8')).jobs).length,3);
     assert.match(result.stderr,/Saved 3 jobs/);
   } finally {await rm(dir,{recursive:true,force:true});}

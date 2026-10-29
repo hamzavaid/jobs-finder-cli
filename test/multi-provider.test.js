@@ -30,7 +30,7 @@ test('actual CLI variadic/repeated/quoted/comma-separated provider arguments ret
   assert.equal(cli(['url','--search','chef','--website','']).status,1);
   assert.equal(cli(['url','--search','chef']).stdout.trim().split('\n').length,3);
 });
-test('single and three-provider searches interleave source-qualified postings within total limit', async () => {
+test('single and three-provider searches globally rank source-qualified postings within total limit', async () => {
   const [li,indeed,glassdoor] = await Promise.all(['search.html','indeed-mosaic.html','glassdoor-dom.html'].map(fixture));
   const http = {get:async url => url.endsWith('/robots.txt') ? 'User-agent: *\nAllow: /' : url.includes('linkedin.com') ? li : url.includes('indeed.com') ? indeed : glassdoor};
   for (const site of ['LinkedIn','Indeed','Glassdoor']) {
@@ -38,7 +38,7 @@ test('single and three-provider searches interleave source-qualified postings wi
     assert.equal(result.jobs.length,2); assert.ok(result.jobs.every(job => job.source === site));
   }
   const result = await findJobs(normalizeOptions({search:'chef',limit:3,pages:1,website:['LinkedIn','Indeed','Glassdoor']}),http);
-  assert.deepEqual(result.jobs.map(job => job.source),['LinkedIn','Indeed','Glassdoor']);
+  assert.deepEqual(result.jobs.map(job => job.source),['Glassdoor','LinkedIn','LinkedIn']);
   assert.equal(result.stats.errors.length,0);
 });
 test('Glassdoor failure leaves other providers usable and all failures are explicit', async () => {

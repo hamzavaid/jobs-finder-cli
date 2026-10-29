@@ -1,3 +1,4 @@
+import {rankJobs} from './relevance.js';
 import {providers} from './providers.js';
 import {searchProvider} from './provider-search.js';
 import {CollectionManager} from './collection.js';
@@ -15,6 +16,7 @@ export async function findJobs(options, http, context = {}) {
   if ((options.websites ?? Object.keys(providers)).some(site => providers[site]?.kind === 'ats')) {
     collection = context.collection || new CollectionManager({...context,http:context.apiHttp || createApiClient({signal:context.signal,delayMs:options.delay})});
   }
+  const candidateOptions = {...options,limit:Math.min(1000,Math.max(100,options.limit * 4))};
   const selected = options.websites ?? Object.keys(providers);
   const outcomes = await Promise.all(selected.map(async site => {
     try {
@@ -22,7 +24,7 @@ export async function findJobs(options, http, context = {}) {
       context.report?.(site,'searching');
       const provider = providers[site];
       if (!provider) throw new Error(`Unknown provider: ${site}`);
-      const outcome = provider.kind === 'ats' ? await collection.find(provider,options) : await searchProvider(provider,options,http);
+      const outcome = provider.kind === 'ats' ? await collection.find(provider,candidateOptions) : await searchProvider(provider,candidateOptions,http);
       context.signal?.throwIfAborted();
       context.report?.(site,`${outcome.jobs.length} matching jobs collected`);
       return {site,outcome};
@@ -46,19 +48,10 @@ export async function findJobs(options, http, context = {}) {
     providerJobs.push({site,jobs:outcome.jobs});
   }
   if (!successfulProviders) throw new AggregateError(allErrors, `All selected sites failed: ${stats.errors.join(' | ')}`);
-  // Interleave sites so a full LinkedIn page cannot prevent Indeed from appearing.
-  const merged = [];
-  for (let i = 0; merged.length < options.limit; i++) {
-    let added = 0;
-    for (const provider of providerJobs) {
-      if (provider.jobs[i]) {merged.push(provider.jobs[i]); added++;}
-      if (merged.length >= options.limit) break;
-    }
-    if (!added) break;
-  }
+  const merged = providerJobs.flatMap(provider => provider.jobs);
   const duplicateHints = identifyCrossSourceDuplicates(merged);
   stats.possibleCrossSourceDuplicates = duplicateHints.possible;
   stats.exactCacheHits = outcomes.filter(item => item.outcome?.stats.exactCacheHit).length;
   stats.duplicatesRemoved = outcomes.reduce((sum,item) => sum + (item.outcome?.stats.duplicatesRemoved || 0),0);
-  return {jobs:duplicateHints.jobs,stats};
+  return {jobs:rankJobs(duplicateHints.jobs,options,{now:context.now?.() ?? Date.now()}).slice(0,options.limit),stats};
 }

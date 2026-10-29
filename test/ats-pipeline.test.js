@@ -47,7 +47,7 @@ test('underlying posting revision invalidates an exact-search cache', async () =
 test('all selected ATS providers use the shared orchestration without manual boards', async () => temporary(async root => {
   const cache = new CacheManager({root}),http = fixtureApi(),collection = new CollectionManager({cache,http});
   const result = await findJobs(normalizeOptions({search:'chef',website:['Greenhouse','Lever','Ashby']}),null,{collection});
-  assert.deepEqual(result.jobs.map(job => job.source),['Greenhouse','Lever','Ashby','Lever']);
+  assert.deepEqual(result.jobs.map(job => job.source),['Ashby','Greenhouse','Lever','Lever']);
   assert.ok(result.jobs.every(job => job.title.includes('Chef')));
 }));
 test('HTML-only selection never calls ATS discovery or collection', async () => {
@@ -70,7 +70,7 @@ test('selected ATS providers execute concurrently while output order remains sta
     return {jobs:[{source:provider.name,id:provider.name,title:'Chef'}],stats:{pages:1,cardsSeen:1,rejected:0,detailRequests:0,unknownExcluded:0,facetReliant:[],errors:[]}};
   }};
   const result = await findJobs(normalizeOptions({search:'chef',website:['Greenhouse','Lever','Ashby']}),null,{collection});
-  assert.equal(maximum,3);assert.deepEqual(result.jobs.map(job => job.source),['Greenhouse','Lever','Ashby']);
+  assert.equal(maximum,3);assert.deepEqual(result.jobs.map(job => job.source),['Ashby','Greenhouse','Lever']);
 });
 
 test('bounded partial searches also get exact-cache hits without concealing partial coverage', async () => temporary(async root => {

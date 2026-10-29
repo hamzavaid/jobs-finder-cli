@@ -7,7 +7,7 @@ import {mapConcurrent} from './concurrency.js';
 
 export function searchCacheKey(options,provider) {
   const {search,company,location,dateSeconds,remote,workplace,experience,employment,under,verified,limit,pages,sort,details,strict,websites} = options;
-  return stableKey({provider,search:search.toLowerCase().replace(/\s+/g,' '),company:company.toLowerCase().replace(/\s+/g,' '),location:location.toLowerCase().replace(/\s+/g,' '),dateSeconds,remote,workplace,experience,employment,under,verified,limit,pages,sort,details,strict,websites:[...websites].sort()});
+  return stableKey({retrievalVersion:2,provider,search:search.toLowerCase().replace(/\s+/g,' '),company:company.toLowerCase().replace(/\s+/g,' '),location:location.toLowerCase().replace(/\s+/g,' '),dateSeconds,remote,workplace,experience,employment,under,verified,limit,pages,sort,details,strict,websites:[...websites].sort()});
 }
 export class CollectionManager {
   constructor({cache,http,signal,report = () => {},now = Date.now,maxBoards = 64,discoveryOptions = {}} = {}) {

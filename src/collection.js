@@ -6,6 +6,7 @@ import {DiscoveryManager,inventoryFingerprint,mergeInventory} from './discovery.
 import {createApiClient} from './api-http.js';
 import {enrichOnce,preserveEnrichment,enrichmentFailure,retryDue,enrichmentPriority} from './enrichment.js';
 import {FilterEngine} from './filter-engine.js';
+import {FILTER_VERSION} from './filters.js';
 import {boardKey,emptyStats} from './ats/shared.js';
 import {mapConcurrent} from './concurrency.js';
 
@@ -14,7 +15,7 @@ export function postingRevision(jobs) {
 }
 export function searchCacheKey(options,provider) {
   const {search,company,location,dateSeconds,remote,workplace,experience,employment,under,verified,limit,pages,sort,details,strict,websites} = options;
-  return stableKey({retrievalVersion:5,parserVersion:PARSER_VERSION,provider,search:normalizeText(search),company:normalizeText(company),location:normalizeText(location),dateSeconds,remote,workplace,experience,employment,under,verified,limit,pages,sort,details,strict,websites:[...websites].sort()});
+  return stableKey({retrievalVersion:6,filterVersion:FILTER_VERSION,parserVersion:PARSER_VERSION,provider,search:normalizeText(search),company:normalizeText(company),location:normalizeText(location),dateSeconds,remote,workplace,experience,employment,under,verified,limit,pages,sort,details,strict,websites:[...websites].sort()});
 }
 export class CollectionManager {
   constructor({cache,http,signal,report = () => {},now = Date.now,maxBoards = 64,maxEnrichments = 40,maxBulkEnrichments = 8,discoveryOptions = {}} = {}) {
@@ -209,7 +210,7 @@ export class CollectionManager {
         if (!decision.match) {stats.rejected++;if (decision.unknowns.length) stats.unknownExcluded++;continue;}
         boardMatches++;stats.acceptedAfterFiltering++;
         if (results.has(job.id)) stats.duplicatesRemoved++;
-        results.set(job.id,{...job,cacheStatus:this.cache.fresh(record) && (!job.lastObservedAt || this.now() - Date.parse(job.lastObservedAt) < sourceTtl) ? 'fresh' : 'stale',cacheFetchedAt:job.lastObservedAt || record.data.lastSuccessfulFetchAt || record.updatedAt});
+        results.set(job.id,{...job,inferredFilters:decision.inferredFilters,filterEvidence:decision.inferredFilters?.length?'title-supplemented':job.filterEvidence,cacheStatus:this.cache.fresh(record) && (!job.lastObservedAt || this.now() - Date.parse(job.lastObservedAt) < sourceTtl) ? 'fresh' : 'stale',cacheFetchedAt:job.lastObservedAt || record.data.lastSuccessfulFetchAt || record.updatedAt});
         if (results.size > options.limit * 2) {
           const best = engine.sort([...results.values()]).slice(0,options.limit);results.clear();for (const row of best) results.set(row.id,row);
         }

@@ -36,10 +36,10 @@ test('Glassdoor follows allowed public next links, deduplicates repeats, stops r
   const html = await fixture('glassdoor-dom.html'), calls = [];
   const http = {get:async url => {calls.push(url); if (url.endsWith('/robots.txt')) return allow; return calls.length === 2 ? html + '<a rel="next" href="/Job/chef-jobs.htm?page=2">Next</a>' : html;}};
   const result = await findGlassdoorJobs(options({pages:3}),http);
-  assert.equal(result.jobs.length,2); assert.equal(result.stats.pages,2); assert.match(calls[2],/page=2/);
+  assert.equal(result.jobs.length,1); assert.equal(result.stats.pages,2); assert.ok(calls.some(url=>url.includes('page=2')));
   const blockedCalls = [];
   const blocked = await findGlassdoorJobs(options({pages:3}),{get:async url => {blockedCalls.push(url); return url.endsWith('/robots.txt') ? 'User-agent: *\nDisallow: /Job/*_IP*' : html + '<a rel="next" href="/Job/chef-jobs_IP2.htm">Next</a>';}});
-  assert.equal(blockedCalls.length,2); assert.match(blocked.stats.errors[0],/robots.txt disallows/);
+  assert.equal(blockedCalls.length,3); assert.match(blocked.stats.errors.join(' '),/robots.txt disallows/);
 });
 test('Glassdoor rejects login, challenges and unknown HTML; explicit no results is valid', async () => {
   for (const html of ['<title>Sign in</title>', '<title>Just a moment</title>', '<html><body>new layout</body></html>']) {

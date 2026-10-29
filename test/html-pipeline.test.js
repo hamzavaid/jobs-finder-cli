@@ -12,14 +12,14 @@ import {AccessError} from '../src/http.js';
 import {HTML_TTL} from '../src/provider-access.js';
 import {readdir,writeFile} from 'node:fs/promises';
 import {spawnSync} from 'node:child_process';
-const options=extra=>normalizeOptions({search:'chef',website:'Indeed',pages:1,...extra});
+const options=extra=>normalizeOptions({search:'Restaurant Manager',website:'Indeed',pages:1,...extra});
 const fixture=()=>readFile(new URL('./fixtures/indeed-dom.html',import.meta.url),'utf8');
 async function temporary(work) {const root=await mkdtemp(join(tmpdir(),'html-pipeline-'));try {await work(root);}finally {await rm(root,{recursive:true,force:true});}}
 
 test('Glassdoor policy is restricted before any request; other sources continue',async()=> {
  let calls=0;await assert.rejects(findGlassdoorJobs(options(),{get:async()=>{calls++;}}),error=>error.providerStatus==='restricted' && /browser/.test(error.message));assert.equal(calls,0);
  const page=await readFile(new URL('./fixtures/search.html',import.meta.url),'utf8');
- const result=await findJobs(options({website:['LinkedIn','Glassdoor']}),{get:async()=>page},{cache:false});
+ const result=await findJobs(options({search:'chef',website:['LinkedIn','Glassdoor']}),{get:async()=>page},{cache:false});
  assert.equal(result.stats.providers.Glassdoor.status,'restricted');assert.ok(result.jobs.every(job=>job.source==='LinkedIn'));
 });
 test('repeated HTML search reuses persistent results with zero requests and keeps observation times',async()=>temporary(async root=> {
@@ -55,27 +55,27 @@ test('concurrent identical queries share collection and parser version or corrup
  const record=JSON.parse(await readFile(path,'utf8'));record.data.parserVersion--;
  await writeFile(path,JSON.stringify(record));await findIndeedJobs(options(),http,{cache:new CacheManager({root})});assert.equal(calls,3);
  await writeFile(path,'broken JSON');await findIndeedJobs(options(),http,{cache:new CacheManager({root})});assert.equal(calls,4);
- await findIndeedJobs(options({search:'nurse'}),http,{cache:new CacheManager({root})});assert.equal(calls,5);
+ await findIndeedJobs(options({search:'Manager'}),http,{cache:new CacheManager({root})});assert.equal(calls,5);
 }));
 test('rolling dates are evaluated on exact cache hits without another request',async()=>temporary(async root=> {
  let now=Date.parse('2026-10-29T12:00:00Z'),calls=0;
  const page='<script>window._initialData={"results":[{"jk":"abcdef12345678","title":"Chef","company":"Bakery","datePosted":"2026-10-28T12:01:00Z"}]}</script>';
  const http={get:async url=>{calls++;return url.endsWith('/robots.txt')?'User-agent: *\nAllow: /':page;}},cache=new CacheManager({root,now:()=>now});
- assert.equal((await findIndeedJobs(options({date:'1d'}),http,{cache,now:()=>now})).jobs.length,1);
- now+=120000;const result=await findIndeedJobs(options({date:'1d'}),http,{cache,now:()=>now});assert.equal(result.jobs.length,0);assert.equal(result.stats.exactCacheHit,true);assert.equal(calls,2);
+ assert.equal((await findIndeedJobs(options({search:'Chef',date:'1d'}),http,{cache,now:()=>now})).jobs.length,1);
+ now+=120000;const result=await findIndeedJobs(options({search:'Chef',date:'1d'}),http,{cache,now:()=>now});assert.equal(result.jobs.length,0);assert.equal(result.stats.exactCacheHit,true);assert.equal(calls,2);
 }));
 test('details are reused across queries and blocks stop detail work immediately',async()=>temporary(async root=> {
  let details=0,blocked=false;const page=await fixture(),cache=new CacheManager({root});
  const http={get:async url=>{if(url.endsWith('/robots.txt'))return 'User-agent: *\nAllow: /';if(url.includes('/viewjob')){details++;if(blocked)throw new AccessError('HTTP 403',403);return '<div id="jobDescriptionText">Prepare food</div>';}return page;}};
  const first=await findIndeedJobs(options({details:true}),http,{cache});assert.equal(first.jobs[0].description,'Prepare food');
- const second=await findIndeedJobs(options({details:true,search:'pastry'}),http,{cache});assert.equal(details,1);assert.equal(second.stats.detailCacheHits,1);
+ const second=await findIndeedJobs(options({details:true,search:'Manager'}),http,{cache});assert.equal(details,1);assert.equal(second.stats.detailCacheHits,1);
  blocked=true;const partial=await findIndeedJobs(options({details:true}),http,{cache:false});assert.equal(partial.stats.status,'partial');assert.equal(partial.stats.stopStatus,'blocked');assert.equal(partial.jobs[0].detailsFetched,false);assert.equal(partial.jobs[0].resolutionStatus,'incomplete');assert.equal(details,2);
 }));
 test('later page denial, repeated links, unsafe pagination and cancellation preserve honest outcomes',async()=> {
  const page=await fixture(),next='<a rel="next" href="/jobs?start=10">Next</a>';let pages=0;
  const result=await findIndeedJobs(options({pages:3}),{get:async url=>{if(url.endsWith('/robots.txt'))return 'User-agent: *\nAllow: /';if(pages++)throw new AccessError('HTTP 429',429);return page+next;}},{cache:false});
  assert.equal(result.stats.status,'partial');assert.equal(result.stats.stopStatus,'rate_limited');assert.equal(result.jobs.length,1);
- const repeated=await findIndeedJobs(options({pages:3}),{get:async url=>url.endsWith('/robots.txt')?'User-agent: *\nAllow: /':page+'<a rel="next" href="https://www.indeed.com/jobs?q=chef&amp;sort=date">Next</a>'},{cache:false});
+ const repeated=await findIndeedJobs(options({pages:3}),{get:async url=>url.endsWith('/robots.txt')?'User-agent: *\nAllow: /':page+'<a rel="next" href="https://www.indeed.com/jobs?q=Restaurant+Manager&amp;sort=date">Next</a>'},{cache:false});
  assert.equal(repeated.stats.pages,1);assert.match(repeated.stats.errors[0],/repeated pagination/);
  const unsafe=await findIndeedJobs(options({pages:3}),{get:async url=>{assert.ok(!url.includes('127.0.0.1'));return url.endsWith('/robots.txt')?'User-agent: *\nAllow: /':page+'<a rel="next" href="https://127.0.0.1/jobs">Next</a>';}},{cache:false});assert.equal(unsafe.stats.status,'partial');
  const controller=new AbortController();await assert.rejects(findIndeedJobs(options(),{get:async url=>{if(url.endsWith('/robots.txt'))return 'User-agent: *\nAllow: /';controller.abort();throw controller.signal.reason;}},{cache:false,signal:controller.signal}),{name:'AbortError'});

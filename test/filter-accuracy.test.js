@@ -34,7 +34,7 @@ test('strict removes only unverified facets; unknown false never means observed 
     assert.equal(evaluateJob({source,verified:false},o({verified:'false',strict:true})).match,true);
   }
   const loose = o({under:'true'}), strict = {...loose,strict:true};
-  assert.equal(evaluateJob({source:'LinkedIn'},loose).match,true);
+  assert.equal(evaluateJob({source:'LinkedIn'},loose).match,false);
   assert.equal(evaluateJob({source:'LinkedIn'},strict).match,false);
 });
 

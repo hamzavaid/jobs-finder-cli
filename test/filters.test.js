@@ -13,7 +13,7 @@ test('booleans and dates validate', () => {
 test('all user-required flags map to a guest query', () => {
   const o = normalizeOptions({search:'software engineer', date:'1d', company:'Google', remote:'True', experience:'entry', employment:'internship', under:'True', verified:'True', location:'Los Angeles'});
   const u = new URL(makeSearchUrl(o));
-  assert.equal(u.searchParams.get('keywords'), 'software engineer');
+  assert.equal(u.searchParams.get('keywords'), 'software engineer Google entry-level');
   assert.equal(u.searchParams.get('f_TPR'), 'r86400');
   assert.equal(u.searchParams.get('f_E'), '2');
   assert.equal(u.searchParams.get('f_JT'), 'I');
@@ -31,12 +31,12 @@ test('no default occupation and company-name normalization', () => {
   assert.throws(() => normalizeOptions({}));
   assert.equal(normalizeOptions({search:'accountant'}).search, 'accountant');
 });
-test('unknown is excluded for false applicant filter; true can rely on LinkedIn facet', () => {
+test('unknown counts are excluded for both booleans despite LinkedIn facets', () => {
   const job = {company: 'Acme', underTenApplicants:null, verified:null};
   const o1 = normalizeOptions({search:'cook', under:'false'});
   assert.equal(evaluateJob(job, o1).match, false);
   const o2 = normalizeOptions({search:'cook', under:'true'});
-  assert.equal(evaluateJob(job, o2).match, true);
+  assert.equal(evaluateJob(job, o2).match, false);
   assert.deepEqual(evaluateJob(job, o2).facetReliant, ['under']);
   assert.equal(evaluateJob(job, {...o2, strict:true}).match, false);
 });

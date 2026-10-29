@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import {normalizeOptions} from '../src/filters.js';
-import {findJobs} from '../src/search.js';
+import {findJobs as actualFind} from '../src/search.js';
 import {serializeJobs} from '../src/output.js';
 
 const fixture = async name => readFile(new URL(`./fixtures/${name}`, import.meta.url), 'utf8');
@@ -29,3 +29,5 @@ test('CSV escaping and deterministic output', () => {
   assert.ok(csv.startsWith('"source","id","title"')); 
   assert.match(serializeJobs([{id:'444', title:'=HYPERLINK(\"bad\")'}], 'csv'), /\"'=HYPERLINK/);
 });
+
+function findJobs(options,http) {return actualFind(options,http,{cache:false});}

@@ -3,7 +3,7 @@ import {dirname} from 'node:path';
 export const fields = [
   'source', 'id', 'title', 'company', 'location', 'workplace', 'employmentType',
   'seniorityLevel', 'postedAt', 'postedText', 'applicantCount',
-  'underTenApplicants', 'verified', 'filterEvidence', 'url', 'salary', 'description', 'datePrecision', 'unconfirmedFilters', 'boardId', 'region', 'providerJobId', 'companyEvidence', 'cacheStatus', 'cacheFetchedAt', 'possibleDuplicateOf', 'canonicalUrl', 'applicationUrl', 'provenance', 'originalRecords', 'attribution', 'exportRestrictions', 'descriptionCompleteness', 'resolutionStatus', 'relevanceScore', 'schemaVersion', 'parserVersion', 'rawContentHash'
+  'underTenApplicants', 'verified', 'filterEvidence', 'url', 'salary', 'description', 'datePrecision', 'unconfirmedFilters', 'boardId', 'region', 'providerJobId', 'companyEvidence', 'cacheStatus', 'cacheFetchedAt', 'possibleDuplicateOf', 'canonicalUrl', 'applicationUrl', 'provenance', 'originalRecords', 'attribution', 'exportRestrictions', 'descriptionCompleteness', 'resolutionStatus', 'relevanceScore', 'schemaVersion', 'parserVersion', 'rawContentHash', 'inferredFilters'
 ];
 export function csvCell(value) {
   let s = value == null ? '' : typeof value === 'object' ? JSON.stringify(value) : String(value);
@@ -30,7 +30,8 @@ export function serializeJobs(jobs, format = 'table') {
   );
   const warnings = jobs.some(j => j.unconfirmedFilters?.length)
     ? '\nNote: Some site filters could not be independently verified. See --format json / --strict.\n' : '';
-  return [head, '-'.repeat(head.length), ...rows, '', 'Use --format json for each job URL.', warnings].join('\n');
+  const inferred=jobs.some(job=>job.inferredFilters?.length)?'Note: Some experience matches use explicit title signals, not employer seniority metadata. Use --strict to require metadata.\n':'';
+  return [head, '-'.repeat(head.length), ...rows, '', 'Use --format json for each job URL.', warnings,inferred].join('\n');
 }
 export async function emit(text, outputFile = null, stdout = process.stdout) {
   if (!outputFile) {stdout.write(text); return;}

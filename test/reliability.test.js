@@ -8,7 +8,7 @@ import {createHttpClient} from '../src/http.js';
 import {normalizeOptions, evaluateJob} from '../src/filters.js';
 import {parseJobDetail, canonicalJobId} from '../src/parser.js';
 import {saveJobs, savedJobs} from '../src/store.js';
-import {findJobs} from '../src/search.js';
+import {findJobs as actualFind} from '../src/search.js';
 import {parseIndeedDetail} from '../src/indeed.js';
 
 const cli = (...args) => spawnSync(process.execPath, ['bin/jobs.js', ...args], {encoding:'utf8'});
@@ -89,7 +89,7 @@ test('later-page failure preserves accepted jobs and unknown markup is an error'
   const html = await readFile(new URL('./fixtures/search.html',import.meta.url),'utf8');
   let calls = 0;
   const result = await findJobs(normalizeOptions({search:'chef',website:'LinkedIn'}), {get:async () => {if (calls++) throw new Error('HTTP 403'); return html;}});
-  assert.equal(result.jobs.length,2); assert.match(result.stats.errors[0], /partial results/);
+  assert.equal(result.jobs.length,1); assert.match(result.stats.errors[0], /partial results/);
   await assert.rejects(findJobs(normalizeOptions({search:'chef',website:'LinkedIn'}), {get:async () => '<html>new layout</html>'}), /All selected sites failed/);
 });
 test('Indeed structured detail reads graph metadata and keeps unknown attributes null', () => {
@@ -98,3 +98,5 @@ test('Indeed structured detail reads graph metadata and keeps unknown attributes
   assert.equal(job.title,'Nurse'); assert.equal(job.company,'Hospital'); assert.equal(job.location,'Boston');
   assert.equal(job.employmentType,'FULL_TIME'); assert.equal(job.salary.value,50000); assert.equal(job.verified,null);
 });
+
+function findJobs(options,http) {return actualFind(options,http,{cache:false});}

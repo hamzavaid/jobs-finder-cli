@@ -28,8 +28,8 @@ export function validCacheRecord(record,kind,key) {
   if (!data || typeof data !== 'object') return false;
   if (kind !== 'inventory' && record.expiresAt === null) return false;
   if (kind === 'html-policy') return typeof data.body === 'string' || typeof data.status === 'string' && Number.isFinite(data.retryAt);
-  if (kind === 'html-detail') return Number.isInteger(data.parserVersion) && data.job && ['Indeed','Glassdoor'].includes(data.job.source) && typeof data.job.id === 'string' && !!publicLink(data.job.url);
-  if (kind === 'html-search') return Number.isInteger(data.parserVersion) && Array.isArray(data.jobs) && data.jobs.every(job=>job && ['Indeed','Glassdoor'].includes(job.source) && typeof job.id === 'string' && typeof job.title === 'string' && !!publicLink(job.url)) && data.stats && Array.isArray(data.stats.errors) && ['ok','empty','partial'].includes(data.stats.status);
+  if (kind === 'html-detail') return Number.isInteger(data.parserVersion) && data.job && ['LinkedIn','Indeed','Glassdoor'].includes(data.job.source) && typeof data.job.id === 'string' && !!publicLink(data.job.url);
+  if (kind === 'html-search') return Number.isInteger(data.parserVersion) && Array.isArray(data.jobs) && data.jobs.every(job=>job && ['LinkedIn','Indeed','Glassdoor'].includes(job.source) && typeof job.id === 'string' && typeof job.title === 'string' && !!publicLink(job.url)) && data.stats && Array.isArray(data.stats.errors) && ['ok','empty','partial'].includes(data.stats.status);
   if (kind === 'maintenance') return Number.isFinite(Date.parse(data.lastPrunedAt));
   if (kind === 'manifest') return typeof data.revision === 'string' && typeof data.pending === 'boolean';
   if (kind === 'resolution') return ['complete','incomplete','blocked','unsupported','failed'].includes(data.status) && (data.job === null || data.job && typeof data.job.title === 'string' && !!publicLink(data.job.url));

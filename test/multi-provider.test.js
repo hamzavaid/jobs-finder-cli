@@ -35,11 +35,11 @@ test('single and three-provider searches globally rank source-qualified postings
   const http = {get:async url => url.endsWith('/robots.txt') ? 'User-agent: *\nAllow: /' : url.includes('linkedin.com') ? li : url.includes('indeed.com') ? indeed : glassdoor};
   for (const site of ['LinkedIn','Indeed','Glassdoor']) {
     const result = await findJobs(normalizeOptions({search:'chef',website:site,pages:1}),http);
-    assert.equal(result.jobs.length,2); assert.ok(result.jobs.every(job => job.source === site));
+    assert.equal(result.jobs.length,1); assert.ok(result.jobs.every(job => job.source === site));
   }
   const result = await findJobs(normalizeOptions({search:'chef',limit:3,pages:1,website:['LinkedIn','Indeed','Glassdoor']}),http);
-  assert.deepEqual(result.jobs.map(job => job.source),['Glassdoor','LinkedIn','LinkedIn']);
-  assert.equal(result.stats.errors.length,0);
+  assert.deepEqual(result.jobs.map(job => job.source),['Glassdoor','LinkedIn','Indeed']);
+  assert.equal(result.stats.providers.LinkedIn.complete,false);
 });
 test('Glassdoor failure leaves other providers usable and all failures are explicit', async () => {
   const li = await fixture('search.html');
@@ -47,7 +47,7 @@ test('Glassdoor failure leaves other providers usable and all failures are expli
     if (!url.includes('linkedin.com')) throw new Error('HTTP 403');
     return li;
   }});
-  assert.equal(result.jobs.length,2); assert.equal(result.stats.errors.length,2);
+  assert.equal(result.jobs.length,1); assert.ok(result.stats.providers.Indeed.error);assert.ok(result.stats.providers.Glassdoor.error);
   await assert.rejects(findJobs(normalizeOptions({search:'chef',website:['LinkedIn','Indeed','Glassdoor']}),{get:async () => {throw new Error('blocked');}}), /All selected sites failed/);
 });
 test('detail dispatch detects providers, rejects foreign URLs and conflicting options before network', async () => {

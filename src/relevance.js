@@ -28,6 +28,10 @@ export function relevance(job,query,{now = Date.now(),weights = DEFAULT_WEIGHTS,
   const score = terms.length && denominator ? 100 * Object.entries(signals).reduce((sum,[key,value]) => sum + value*(weights[key] || 0),0)/denominator : 0;
   return {match:(!terms.length || !missingTerms.length) && phrasesMatch,score,matchedTerms,missingTerms,uncertainty:uncertain ? ['description'] : [],needsEnrichment:uncertain};
 }
+/** Public search may match employer/location as well as title and description. */
+export function searchEvidence(job,query) {
+  return relevance({...job,description:[job.description,job.company,job.location].filter(Boolean).join(' '),descriptionCompleteness:job.descriptionCompleteness || (job.detailsFetched?'complete':'partial')},query);
+}
 export function rankJobs(jobs,options,{now = Date.now()} = {}) {
   const scored = jobs.map(job => ({job,score:relevance(job,options.search,{now}).score}));
   const trustedDate = job => {const date=job.postedAt && ['day','instant'].includes(job.datePrecision) ? Date.parse(job.postedAt) : NaN;return Number.isFinite(date) && date <= now ? date : -Infinity;};

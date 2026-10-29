@@ -1,5 +1,6 @@
 import {load} from 'cheerio';
 import {normalizeWorkplace} from './filters.js';
+import {validSourceDate,structuredJobs,structuredFields,mergeKnown} from './schema.js';
 const clean = (value) => String(value ?? '').replace(/\s+/g, ' ').trim();
 const first = ($el, selectors) => {
   for (const selector of selectors) {
@@ -25,7 +26,7 @@ function postedData($el) {
   const raw = time.attr('datetime') || null;
   let postedAt = null;
   let datePrecision = null;
-  if (raw && !Number.isNaN(Date.parse(raw))) {
+  if (validSourceDate(raw)) {
     postedAt = /^\d{4}-\d\d-\d\d$/.test(raw) ? raw : new Date(raw).toISOString();
     datePrecision = /^\d{4}-\d\d-\d\d$/.test(raw) ? 'day' : 'instant';
   }
@@ -62,7 +63,7 @@ export function parseSearchCards(html) {
       id, source: 'LinkedIn', title, company, location, url:`https://www.linkedin.com/jobs/view/${id}/`,
       sourceUrl, postedAt, datePrecision, postedText: postedText || context || null,
       companyLogo: node.find('.artdeco-entity-image, img').first().attr('data-delayed-url') || node.find('img').first().attr('src') || null,
-      workplace: null, seniorityLevel: null, employmentType: null,
+      workplace: normalizeWorkplace(location), seniorityLevel: first(node,['[data-test="seniority-level"]']), employmentType: first(node,['[data-test="employment-type"]']),
       jobFunction: null, industries: null, description: null,
       applicantsText: null, applicantCount: null, underTenApplicants: null,
       verified: explicitVerified, fetchedAt: new Date().toISOString(), detailsFetched: false
@@ -73,7 +74,10 @@ export function parseSearchCards(html) {
 export function parseJobDetail(html, fallback = {}) {
   const $ = load(html || '');
   const id = fallback.id;
-  if (!$("h1.top-card-layout__title, h1.topcard__title, .show-more-less-html__markup, .description__text, .num-applicants__caption").length) throw new Error('LinkedIn: unrecognized job detail HTML.');
+  const entries=structuredJobs(html),ld=entries.find(entry=>{try{return canonicalJobId(entry.url)===id;}catch{return false;}})||(entries.length===1?entries[0]:null);
+  for(const value of [ld?.url,$('link[rel="canonical"]').attr('href')].filter(Boolean)) {let observed;try{observed=canonicalJobId(value);}catch{}if(id && observed && observed!==id)throw new Error('LinkedIn: detail belongs to a different posting.');}
+  if (!ld && !$("h1.top-card-layout__title, h1.topcard__title, .show-more-less-html__markup, .description__text, .num-applicants__caption").length) throw new Error('LinkedIn: unrecognized job detail HTML.');
+  fallback=mergeKnown(fallback,structuredFields(ld || {}));
   const result = {
     id: null, source: 'LinkedIn', title: null, company: null, location: null, postedAt: null,
     datePrecision: null, postedText: null, workplace: null,

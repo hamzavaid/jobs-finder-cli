@@ -8,9 +8,10 @@ export function providerError(message,status,code) {
 export function failureStatus(error) {
   if (error.providerStatus) return error.providerStatus;
   if (error.status === 429) return 'rate_limited';
-  if ([401,403,999].includes(error.status) || /challenge|login|checkpoint|HTTP (?:401|403)|access is restricted/i.test(error.message)) return 'blocked';
-  if (/timed out|timeout/i.test(error.message)) return 'timeout';
+  if ([401,403,999].includes(error.status)) return 'blocked';
   if (/unrecognized|schema|different posting/i.test(error.message)) return 'schema_changed';
+  if (/challenge|login|checkpoint|HTTP (?:401|403)|access is restricted/i.test(error.message)) return 'blocked';
+  if (/timed out|timeout/i.test(error.message)) return 'timeout';
   return 'failed';
 }
 export function assertProviderAccess(provider,options,context={}) {

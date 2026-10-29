@@ -23,8 +23,8 @@ function addFilters(command) {
     .option('--workplace <type>', 'remote | hybrid | onsite (instead of --remote)')
     .option('--experience <level>', 'internship | entry | associate | senior | director | executive')
     .option('--employment <type>', 'full-time | part-time | contract | temporary | internship | volunteer | other')
-    .option('--under <boolean>', 'Under 10 applicants; unknown counts are excluded except unconfirmed LinkedIn true facet')
-    .option('--verified <boolean>', 'Job verification; unknown values require a supported facet or are excluded')
+    .option('--under <boolean>', 'Under 10 applicants; unknown counts are excluded for both true and false')
+    .option('--verified <boolean>', 'Job verification; requires explicit observed evidence for true and false')
     .option('--location <place>', 'City, region, or country, e.g. "Los Angeles"');
 }
 function addOutputOptions(command) {
@@ -86,10 +86,11 @@ export async function runCli(argv = process.argv) {
       for(const [site,info] of Object.entries(stats.providers)) if(info.status) eprint(`${site}: ${info.status}${info.fromCache?' (cached)':''}${info.stale?' (stale)':''}${info.error?`; ${info.error}`:''}`);
       if (stats.exactCacheHits) eprint(`Reused cached search results for ${stats.exactCacheHits} provider(s).`);
       eprint(`Scanned ${stats.cardsSeen} cards across ${stats.pages} page(s) on ${options.websites.join(', ')}; ${jobs.length} returned (result limit ${options.limit}), ${stats.rejected} excluded.`);
+      eprint(`Evidence: ${stats.unknownExcluded} candidates excluded with unknown required attributes; ${Object.values(stats.providers).reduce((sum,provider)=>sum+(provider.facetUnconfirmed||0),0)} unconfirmed server-facet criteria excluded.`);
       for (const issue of stats.errors.slice(0,8)) eprint(`WARNING: ${issue}`);
       if (stats.errors.length > 8) eprint(`WARNING: ${stats.errors.length - 8} additional provider/board issues; coverage is partial.`);
       if (stats.facetReliant.length) {
-        eprint(`CAUTION: Could not independently confirm some server-applied facets: ${stats.facetReliant.join(', ')}. Use --strict to exclude uncertain matches.`);
+        eprint(`Unconfirmed server-facet criteria excluded: ${stats.facetReliant.join(', ')}.`);
       }
       if (options.under === false || options.verified === false) {
         eprint('NOTE: False values for --under/--verified need explicit public evidence; unknown is excluded, not assumed false.');

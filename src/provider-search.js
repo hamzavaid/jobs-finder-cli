@@ -1,10 +1,11 @@
-import {evaluateJob, normalizeCompany} from './filters.js';
+import {evaluateJob, normalizeCompany,FILTER_VERSION} from './filters.js';
 import {assertPublicHtml} from './http.js';
 import {normalizeJob,validateJob} from './schema.js';
 import {PARSER_VERSION} from './schema.js';
 import {CacheManager,stableKey} from './cache.js';
 import {assertProviderAccess,allowedHtmlUrl,failureStatus,providerError,HTML_TTL} from './provider-access.js';
 import {htmlFilterSupport} from './provider-filter-map.js';
+import {searchEvidence} from './relevance.js';
 
 export function assertSearchPage(html, cards, emptyPattern, site) {
   assertPublicHtml(html);
@@ -13,7 +14,7 @@ export function assertSearchPage(html, cards, emptyPattern, site) {
 /** Common bounded sequential pagination and evidence-aware filtering. */
 export async function searchProvider(provider, options, http, onProgress = () => {}, context = {}) {
   assertProviderAccess(provider,options,context);
-  if (!provider.accessPolicy) return collectPages(provider,options,http,onProgress,context);
+  if (!provider.accessPolicy && !provider.cacheSearch) return collectPages(provider,options,http,onProgress,context);
   const now=context.now||Date.now;
   const started=performance.now();
   let cache=context.cache===false?null:context.cache||new CacheManager({signal:context.signal,now,lockTimeoutMs:120000});
@@ -22,7 +23,7 @@ export async function searchProvider(provider, options, http, onProgress = () =>
   const safeRead=async(kind,key)=>{try{return await cache?.read(kind,key);}catch(error){cacheWarning(error);return null;}};
   const safePut=async(...args)=>{try{return await cache?.put(...args);}catch(error){cacheWarning(error);}};
   const criteria=Object.fromEntries(Object.entries(options).filter(([key])=>!['websites','website','format','output','save'].includes(key)));
-  const key=stableKey({provider:provider.name,criteria,parserVersion:PARSER_VERSION,access:'public-html-v1'});
+  const key=stableKey({provider:provider.name,criteria,parserVersion:PARSER_VERSION,filterVersion:FILTER_VERSION,access:'public-html-v1'});
   const run=async()=> {
     context.signal?.throwIfAborted();
     const cached=await safeRead('html-search',key);
@@ -72,9 +73,9 @@ export async function searchProvider(provider, options, http, onProgress = () =>
   }
 }
 async function collectPages(provider, options, http, onProgress, context) {
-  const detailCache=provider.accessPolicy && context.cache || null;
+  const detailCache=(provider.accessPolicy || provider.cacheSearch) && context.cache || null;
   const results = new Map(), seen = new Set();
-  const stats = {pages:0, cardsSeen:0, detailRequests:0, detailCacheHits:0, rejected:0, unknownExcluded:0, facetReliant:[], errors:[],status:'ok',complete:true,httpRequests:0,accessMode:'public-html',unsupportedFilters:['under','verified'].filter(key=>options[key]!=null)};
+  const stats = {pages:0, cardsSeen:0, detailRequests:0, detailCacheHits:0, rejected:0, unknownExcluded:0, facetReliant:[], errors:[],status:'ok',complete:true,httpRequests:0,accessMode:'public-html',unsupportedFilters:['under','verified'].filter(key=>options[key]!=null && htmlFilterSupport[provider.name]?.[key]==='unsupported')};
   stats.filterSupport=htmlFilterSupport[provider.name];
   const transport=http;http={get:(...args)=>{stats.httpRequests++;return transport.get(...args);}};
   const visited=new Set(), started=performance.now(),now=context.now||Date.now;
@@ -93,6 +94,9 @@ async function collectPages(provider, options, http, onProgress, context) {
       const html = await http.get(url);
       assertPublicHtml(html);
       const cards = provider.parseCards(html);
+      // Spend scarce detail capacity on likely query matches before exploration.
+      const priority=new Map(cards.map(card=>{const evidence=searchEvidence(card,options.search);return [card,(evidence.match?100:0)+evidence.matchedTerms.length];}));
+      cards.sort((a,b)=>priority.get(b)-priority.get(a));
       stats.schemaRejected=(stats.schemaRejected||0)+(cards.schemaRejected||0);
       assertSearchPage(html, cards, provider.emptyPattern, provider.name);
       stats.pages++;
@@ -106,11 +110,17 @@ async function collectPages(provider, options, http, onProgress, context) {
         if (initial.failures.length) {stats.rejected++; continue;}
         if(provider.accessPolicy && initial.unknowns.some(key=>['under','verified'].includes(key))) {stats.rejected++;stats.unknownExcluded++;continue;}
         let job = card;
-        if (!card.detailsFetched && (options.details || options.strict || (provider.accessPolicy && initial.unknowns.length) || (provider.name === 'LinkedIn' && (options.under != null || options.verified != null)))) {
-          const detailKey=`${provider.name}:${card.id}:${PARSER_VERSION}`,cached=await detailCache?.read('html-detail',detailKey);
+        const lexical=searchEvidence(card,options.search);
+        if(!lexical.match && !lexical.needsEnrichment) {stats.rejected++;continue;}
+        const unresolved=[...initial.unknowns,...initial.facetReliant,...(options.strict?initial.inferredFilters:[])];
+        const exploratory=!lexical.match && !lexical.matchedTerms.length && !options.details;
+        const canExplore=!exploratory || (stats.exploratoryDetails||0)<2;
+        if (!card.detailsFetched && canExplore && (options.details || unresolved.length || lexical.needsEnrichment)) {
+          const detailKey=`${provider.name}:${card.id}:${PARSER_VERSION}:${FILTER_VERSION}`,cached=await detailCache?.read('html-detail',detailKey);
           if(detailCache?.fresh(cached) && cached.data.parserVersion===PARSER_VERSION && cached.data.job.id===card.id && cached.data.job.source===provider.name) {job=cached.data.job;stats.detailCacheHits++;}
-          else if(!provider.accessPolicy || stats.detailRequests<25) {
+          else if(stats.detailRequests<25) {
             stats.detailRequests++;
+            if(exploratory)stats.exploratoryDetails=(stats.exploratoryDetails||0)+1;
             try {
               const detailUrl=provider.detailUrl(card.id, card);
               if(provider.accessPolicy) allowedHtmlUrl(detailUrl,provider,{detail:true});
@@ -121,7 +131,8 @@ async function collectPages(provider, options, http, onProgress, context) {
               if(error.name==='AbortError'||context.signal?.aborted) throw error;
               if(['blocked','restricted','rate_limited'].includes(failureStatus(error))) {
                 const summary=normalizeJob({...card,source:provider.name,resolutionStatus:'incomplete'});
-                if(evaluateJob(summary,evaluation,now()).match && validateJob(summary).valid)results.set(summary.id,summary);
+                const decision=evaluateJob(summary,evaluation,now());
+                if(decision.match && searchEvidence(summary,options.search).match && validateJob(summary).valid)results.set(summary.id,{...summary,inferredFilters:decision.inferredFilters,filterEvidence:decision.inferredFilters.length?'title-supplemented':'observed-or-unfiltered'});
                 throw error;
               }
               stats.errors.push(`${provider.name}: incomplete detail ${card.id}: ${error.message}`);job={...card,resolutionStatus:'incomplete'};
@@ -129,13 +140,21 @@ async function collectPages(provider, options, http, onProgress, context) {
           } else {stats.complete=false;if(!stats.errors.some(error=>error.includes('detail budget')))stats.errors.push(`${provider.name}: detail budget reached.`);}
         }
         const decision = evaluateJob(job, evaluation,now());
+        if(!searchEvidence(job,options.search).match) {
+          stats.rejected++;stats.keywordExcluded=(stats.keywordExcluded||0)+1;
+          if(!job.detailsFetched) {stats.unknownExcluded++;stats.incompleteKeywords=(stats.incompleteKeywords||0)+1;}
+          continue;
+        }
         if (!decision.match) {
           stats.rejected++;
           if (decision.unknowns.length || decision.facetReliant.length) stats.unknownExcluded++;
+          stats.facetUnconfirmed=(stats.facetUnconfirmed||0)+decision.facetReliant.length;
           continue;
         }
+        const titleSupplement=decision.inferredFilters.length>0;
         job = normalizeJob({...job, source:provider.name,
-          filterEvidence:decision.facetReliant.length ? `${provider.name.toLowerCase()}-facet-unconfirmed` : 'observed-or-unfiltered',
+          filterEvidence:titleSupplement?'title-supplemented':'observed-or-unfiltered',
+          inferredFilters:decision.inferredFilters,
           unconfirmedFilters:decision.facetReliant});
         if (!validateJob(job).valid) {stats.rejected++;stats.errors.push(`${provider.name}: malformed posting quarantined (schema drift).`);continue;}
         decision.facetReliant.forEach(f => facets.add(f));
@@ -153,7 +172,7 @@ async function collectPages(provider, options, http, onProgress, context) {
         nextUrl = provider.nextPage(html);
         if (!nextUrl) break;
       }
-      if(page+1>=options.pages || results.size>=options.limit) {stats.complete=false;if(provider.accessPolicy)stats.errors.push(`${provider.name}: search stopped at page/result budget; further results may exist.`);}
+      if(page+1>=options.pages || results.size>=options.limit) {stats.complete=false;stats.errors.push(`${provider.name}: search stopped at page/result budget; further results may exist.`);}
     }
   } catch (error) {
     if(error.name==='AbortError'||context.signal?.aborted) throw error;
@@ -163,8 +182,9 @@ async function collectPages(provider, options, http, onProgress, context) {
     stats.errors.push(`${provider.name}: partial results; stopped after ${error.message}`);
   }
   stats.facetReliant = [...facets];
+  if(stats.incompleteKeywords)stats.errors.push(`${provider.name}: ${stats.incompleteKeywords} candidates excluded because keyword evidence remained incomplete.`);
   if(stats.errors.length) stats.complete=false;
   stats.status=stats.complete?(results.size?'ok':'empty'):'partial';
-  stats.durationMs=performance.now()-started;stats.observedAt=new Date(now()).toISOString();stats.jobsAccepted=results.size;
+  stats.durationMs=performance.now()-started;stats.observedAt=new Date(now()).toISOString();stats.jobsAccepted=results.size;stats.acceptedAfterFiltering=results.size;
   return {jobs:[...results.values()], stats};
 }

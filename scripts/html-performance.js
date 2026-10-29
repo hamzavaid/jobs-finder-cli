@@ -10,7 +10,7 @@ import {readFile} from 'node:fs/promises';
 let requests=0;
 globalThis.fetch=async url=>{requests++;return new Response(url.endsWith('/robots.txt')?'User-agent: *\\nAllow: /':await readFile('test/fixtures/indeed-dom.html','utf8'));};
 const {runCli}=await import('./src/cli.js');
-await runCli(['node','jobs','find','--search','chef','--website','Indeed','--pages','1','--delay','750','--format','json']);
+await runCli(['node','jobs','find','--search','Restaurant Manager','--website','Indeed','--pages','1','--delay','750','--format','json']);
 console.error('BENCH_REQUESTS='+requests);
 `;
 try {

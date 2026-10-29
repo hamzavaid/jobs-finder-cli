@@ -1,4 +1,6 @@
 import {tokenize} from './relevance.js';
+import {validSourceDate} from './schema.js';
+export const FILTER_VERSION = 2;
 /** Validation and mapping for job-search criteria (industry-agnostic). */
 export const EXPERIENCE = Object.freeze({
   internship: '1', intern: '1', entry: '2', 'entry-level': '2', junior: '2',
@@ -89,9 +91,9 @@ export function normalizeOptions(input) {
 
 export function makeSearchUrl(options, start = 0) {
   const url = new URL('https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search');
-  // Company names aren't numeric company IDs. Use as keywords only if no search text
-  // was supplied; apply a normalized exact-company comparison after retrieval.
-  if (options.search || options.company) url.searchParams.set('keywords', options.search || options.company);
+  // Retrieval hints improve the candidate pool; they never verify a constraint.
+  const keywords=linkedInKeywords(options);
+  if (keywords) url.searchParams.set('keywords',keywords);
   if (options.location) url.searchParams.set('location', options.location);
   if (options.dateSeconds) url.searchParams.set('f_TPR', `r${options.dateSeconds}`);
   if (options.experience) url.searchParams.set('f_E', EXPERIENCE[options.experience]);
@@ -106,6 +108,16 @@ export function makeSearchUrl(options, start = 0) {
   return url.toString();
 }
 
+export function linkedInKeywords(options) {
+  let query=options.search || '';
+  const contains=(text,phrase)=>{const haystack=tokenize(text),needle=tokenize(phrase);return needle.length && haystack.some((_,index)=>needle.every((word,offset)=>haystack[index+offset]===word));};
+  if(options.company && !contains(query,options.company))query=[query,options.company].filter(Boolean).join(' ');
+  const code=EXPERIENCE[options.experience];
+  if(code==='2' && !/\b(?:entry[- ]level|junior|new grad(?:uate)?)\b/i.test(query))query=[query,'entry-level'].filter(Boolean).join(' ');
+  if(code==='1' && !/\bintern(?:ship)?\b/i.test(query))query=[query,'internship'].filter(Boolean).join(' ');
+  return query;
+}
+
 export function normalizeCompany(s = '') {
   return String(s).toLowerCase().replace(/\b(incorporated|inc\.?|llc|ltd\.?|limited|corp\.?|corporation)\b\.?/g, '')
     .replace(/[^\p{L}\p{N}]+/gu, ' ').trim().replace(/\s+/g, ' ');
@@ -115,10 +127,13 @@ export function evaluateJob(job, o, now = Date.now()) {
   const failures = [];
   const unknowns = [];
   const facetReliant = [];
+  const inferredFilters=[];
   if (o.company && normalizeCompany(job.company) !== normalizeCompany(o.company)) failures.push('company');
-  if (['Indeed','Glassdoor'].includes(o.provider || job.source) && o.location) {
-    if (!job.location) unknowns.push('location');
-    else if (!String(job.location).toLowerCase().includes(o.location.toLowerCase())) failures.push('location');
+  if(o.company && job.companyEvidence && job.companyEvidence!=='observed')unknowns.push('company');
+  if (o.location) {
+    const locations=[job.location,...(job.secondaryLocations || [])].filter(Boolean),wanted=tokenize(o.location);
+    if (!locations.length) unknowns.push('location');
+    else if (!locations.some(value=>{const words=tokenize(value);return words.some((_,index)=>wanted.every((word,offset)=>words[index+offset]===word));})) failures.push('location');
   }
   const provider = o.provider || job.source || 'LinkedIn';
   const supported = o.supportedFacets ?? (provider === 'LinkedIn' ? ['date','workplace','remote','experience','employment','under','verified'] : o.indeedSupportedFacets || []);
@@ -126,14 +141,14 @@ export function evaluateJob(job, o, now = Date.now()) {
   if (o.dateSeconds) {
     if (job.postedAt && job.datePrecision === 'instant') {
       const t = Date.parse(job.postedAt);
-      if (!Number.isFinite(t)) unknowns.push('date');
+      if (!validSourceDate(job.postedAt) || job.postedAt.length===10) unknowns.push('date');
       else if (t > now || now - t > o.dateSeconds * 1000) failures.push('date');
     } else if (job.postedAt && job.datePrecision === 'day') {
       const day = Date.parse(job.postedAt);
       // Calendar dates have no source timezone: allow the full UTC-14..UTC+14 envelope.
       const earliest = day - 14 * 3600000, latest = day + 38 * 3600000;
       const cutoff = now - o.dateSeconds * 1000;
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(job.postedAt) || !Number.isFinite(day)) unknowns.push('date');
+      if (!validSourceDate(job.postedAt) || !/^\d{4}-\d{2}-\d{2}$/.test(job.postedAt)) unknowns.push('date');
       else if (latest < cutoff || earliest > now) failures.push('date');
       else if (earliest < cutoff || latest > now) (hasFacet('date') ? facetReliant : unknowns).push('date');
     } else {
@@ -147,7 +162,10 @@ export function evaluateJob(job, o, now = Date.now()) {
       else unknowns.push(name);
     } else if (actual !== expected) failures.push(name);
   };
-  validateFacet('under', o.under, job.underTenApplicants, o.under === true && hasFacet('under'));
+  const count=Number.isInteger(job.applicantCount) && job.applicantCount>=0?job.applicantCount:null;
+  const under=count===null?job.underTenApplicants:count<10;
+  if(o.under!=null && count!==null && typeof job.underTenApplicants==='boolean' && job.underTenApplicants!==under)failures.push('under');
+  validateFacet('under', o.under, under, o.under === true && hasFacet('under'));
   validateFacet('verified', o.verified, job.verified, o.verified === true && hasFacet('verified'));
   const markUnknown = (key) => (hasFacet(key) ? facetReliant : unknowns).push(key);
   const wantedWorkplace = o.workplace || (o.remote === true ? 'remote' : null);
@@ -161,9 +179,13 @@ export function evaluateJob(job, o, now = Date.now()) {
     else if (normalizeWorkplace(job.workplace) === 'remote') failures.push('remote');
   }
   if (o.experience) {
-    if (!job.seniorityLevel) markUnknown('experience');
-    else if (!knownExperience(job.seniorityLevel)) markUnknown('experience');
-    else if (EXPERIENCE[o.experience] !== knownExperience(job.seniorityLevel)) failures.push('experience');
+    const expected=EXPERIENCE[o.experience],observed=knownExperience(job.seniorityLevel),title=titleExperience(job.title);
+    // Conflicts are rejected, never resolved by overwriting employer metadata.
+    if(title.nonEntry && ['1','2'].includes(expected) || observed && title.code && observed!==title.code) failures.push('experience');
+    else if(observed) {if(observed!==expected)failures.push('experience');}
+    else if(job.seniorityLevel && !/^(?:not applicable|n\/a|unknown|unspecified)$/i.test(String(job.seniorityLevel).trim()))markUnknown('experience');
+    else if(title.code && !o.strict) {if(title.code!==expected)failures.push('experience');else inferredFilters.push('experience');}
+    else markUnknown('experience');
   }
   if (o.employment) {
     if (!job.employmentType) markUnknown('employment');
@@ -173,13 +195,12 @@ export function evaluateJob(job, o, now = Date.now()) {
       else if (!types.includes(EMPLOYMENT[o.employment])) failures.push('employment');
     }
   }
-  if (failures.length) return {match: false, failures, unknowns, facetReliant};
-  if (unknowns.length || (o.strict && facetReliant.length)) return {match: false, failures, unknowns, facetReliant};
-  return {match: true, failures, unknowns, facetReliant};
+  return {match:!failures.length&&!unknowns.length&&!facetReliant.length,failures,unknowns,facetReliant,inferredFilters};
 }
 export function normalizeWorkplace(input) {
   const s = String(input || '').toLowerCase().replaceAll('_','-');
   if (/\bhybrid\b/.test(s)) return 'hybrid';
+  if (/\bremote\b/.test(s) && /\b(?:on[- ]?site|in[- ]?person)\b/.test(s)) return null;
   if (/\b(on[- ]?site|in[- ]?person)\b/.test(s)) return 'onsite';
   if (/\b(?:not|no) remote\b/.test(s)) return null;
   if (/\bremote\b/.test(s)) return 'remote';
@@ -187,13 +208,15 @@ export function normalizeWorkplace(input) {
 }
 export function knownExperience(input) {
   const s = String(input || '').toLowerCase().replaceAll('_','-');
-  if (/\bexecutive\b/.test(s)) return '6';
-  if (/\bdirector\b/.test(s)) return '5';
-  if (/\b(?:intern|internship)\b/.test(s)) return '1';
-  if (/\b(?:entry|junior)\b/.test(s)) return '2';
-  if (/\b(?:mid|senior)\b/.test(s)) return '4';
-  if (/\bassociate\b/.test(s)) return '3';
-  return null;
+  if(/^(?:associate |senior )?director(?: level)?$/.test(s.trim()))return '5';
+  const codes=[[/\bexecutive\b/,'6'],[/\bdirector\b/,'5'],[/\b(?:intern|internship)\b/,'1'],[/\b(?:entry|junior)\b/,'2'],[/\b(?:mid|senior|staff|principal)\b/,'4'],[/\bassociate\b/,'3']].filter(([pattern])=>pattern.test(s)).map(([,code])=>code);
+  return new Set(codes).size===1?codes[0]:null;
+}
+export function titleExperience(value) {
+  const title=String(value||'').normalize('NFKC');
+  const nonEntry=/\b(?:senior|sr\.?|staff|principal|director|executive)\b/i.test(title);
+  const signals=[[/\b(?:intern|internship)\b/i,'1'],[/\b(?:junior|jr\.?|entry[- ]level)\b/i,'2'],[/\b(?:senior|sr\.?)\b/i,'4'],[/\bdirector\b/i,'5']].filter(([pattern])=>pattern.test(title)).map(([,code])=>code);
+  return {code:new Set(signals).size===1?signals[0]:null,nonEntry};
 }
 export function knownEmployment(input) {
   const s = String(input || '').toLowerCase().replaceAll('_','-');

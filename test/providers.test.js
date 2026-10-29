@@ -21,13 +21,13 @@ test('two-source search merges both providers without mixing IDs', async () => {
   const result = await findJobs(options, http);
   assert.ok(result.jobs.some(j=>j.source==='LinkedIn'));
   assert.ok(result.jobs.some(j=>j.source==='Indeed'));
-  assert.equal(result.stats.errors.length, 0);
+  assert.equal(result.stats.providers.LinkedIn.complete,false);
 });
 test('failure of one provider does not discard other provider', async () => {
   const indeed = await readFile(new URL('./fixtures/indeed-mosaic.html', import.meta.url), 'utf8');
   const http = {get:async url => url.includes('linkedin.com') ? Promise.reject(new Error('HTTP 403')) : indeed};
   const result = await findJobs(normalizeOptions({search:'accountant', website:['LinkedIn','Indeed']}), http);
-  assert.equal(result.stats.errors.length, 1);
+  assert.ok(result.stats.providers.LinkedIn.error);
   assert.ok(result.jobs.every(j=>j.source==='Indeed'));
 });
 test('saved IDs are namespaced by site', async () => {

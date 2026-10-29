@@ -13,7 +13,9 @@ test('ATS filters work across occupations and secondary locations, without treat
 test('strict employer filtering rejects inferred board labels and unknown experience stays unknown', () => {
   assert.equal(make({company:'Hospital',strict:true}).evaluate(job).match,true);
   assert.equal(make({company:'Hospital',strict:true}).evaluate({...job,companyEvidence:'board-identifier'}).match,false);
-  assert.equal(make({experience:'entry'}).evaluate({...job,title:'Entry Level Nurse'}).match,false);
+  assert.equal(make({experience:'entry'}).evaluate({...job,title:'Entry Level Nurse'}).match,true);
+  assert.equal(make({experience:'entry',strict:true}).evaluate({...job,title:'Entry Level Nurse'}).match,false);
+  assert.equal(make({experience:'entry'}).evaluate({...job,title:'Nurse II'}).match,false);
   assert.equal(make({verified:'false'}).evaluate(job).match,false);
 });
 test('ATS recent sorting uses public posting time and keeps unknown dates last; relevant favors titles', () => {

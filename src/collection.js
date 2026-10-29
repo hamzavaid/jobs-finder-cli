@@ -1,3 +1,4 @@
+import {scheduleBoards,observeBoard} from './board-scheduler.js';
 import {CacheManager,CACHE_TTL,stableKey} from './cache.js';
 import {DiscoveryManager,inventoryFingerprint,mergeInventory} from './discovery.js';
 import {createApiClient} from './api-http.js';
@@ -34,9 +35,10 @@ export class CollectionManager {
     if (!boards.length) throw new Error(`${provider.name}: no validated boards available${discovery.errors.length ? '; ' + discovery.errors.join(' | ') : '; discovery or validation is incomplete'}.`);
     stats.boardsKnown = boards.length;
     const engine = new FilterEngine(options,{now:this.now}), results = new Map(),refs = [],changes = [];
-    const snapshots = boards.map(board => ({board,key:`${provider.name}:${boardKey(board)}`}));
+    let snapshots = boards.map(board => ({board,key:`${provider.name}:${boardKey(board)}`}));
     // Read large posting shards only inside the two-worker loop, never all at once.
-    snapshots.sort((a,b) => (Date.parse(a.board.lastJobFetchAt) || 0) - (Date.parse(b.board.lastJobFetchAt) || 0) || boardKey(a.board).localeCompare(boardKey(b.board)));
+    snapshots = scheduleBoards(snapshots,options,{now:this.now(),budget:this.maxBoards});
+    stats.boardsScheduled = Math.min(this.maxBoards,boards.length);
     let refreshes = 0,providerBlocked = Date.parse(inventory.providerRetryAt) > this.now();
     this.report(provider.name,`fetching jobs: 0 / ${boards.length} boards`);
     await mapConcurrent(snapshots,2,async ({board,key:boardCacheKey}) => {
@@ -94,6 +96,7 @@ export class CollectionManager {
           record.data.content = true;dirty = true;
         } catch (error) {if (error.name === 'AbortError') throw error;stats.errors.push(`${provider.name}: bulk enrichment failed: ${error.message}`);}
       }
+      let boardMatches = 0;
       const enriched = [];
       for (let job of record.data.jobs) {
         if (stats.cardsSeen && stats.cardsSeen % 512 === 0) {await new Promise(resolve => setImmediate(resolve));this.signal?.throwIfAborted();}
@@ -112,6 +115,7 @@ export class CollectionManager {
         enriched.push(job);
         const decision = engine.evaluate(job);
         if (!decision.match) {stats.rejected++;if (decision.unknowns.length) stats.unknownExcluded++;continue;}
+        boardMatches++;
         if (results.has(job.id)) stats.duplicatesRemoved++;
         results.set(job.id,{...job,cacheStatus:this.cache.fresh(record) && (!job.lastObservedAt || this.now() - Date.parse(job.lastObservedAt) < CACHE_TTL.postings) ? 'fresh' : 'stale',cacheFetchedAt:job.lastObservedAt || record.data.lastSuccessfulFetchAt || record.updatedAt});
         if (results.size > options.limit * 2) {
@@ -124,9 +128,15 @@ export class CollectionManager {
         try {record = await this.cache.put('postings',boardCacheKey,record.data,{ttl:remaining});}
         catch (error) {if (error.name === 'AbortError') throw error;stats.errors.push(`${provider.name}: board cache write failed: ${error.message}`);}
       }
+      if (provider.kind !== 'feed') {
+        const changedIndex = changes.findIndex(item => boardKey(item) === boardKey(board));
+        const observed = observeBoard(changedIndex >= 0 ? changes[changedIndex] : board,options,boardMatches,this.now());
+        if (changedIndex >= 0) changes[changedIndex] = observed;else changes.push(observed);
+      }
       refs.push({key:boardCacheKey,revision:record.data.revision});
       this.report(provider.name,`fetching jobs: ${stats.boardsVisited} / ${boards.length} boards`);
     },{signal:this.signal});
+    stats.boardsRefreshed = refreshes;stats.boardsSkipped = boards.length-stats.boardsVisited;stats.boardsBlocked = providerBlocked ? stats.boardsSkipped : 0;
     if (stats.detailRequests >= this.maxEnrichments) stats.errors.push(`${provider.name}: detail request budget reached; unmatched unknown attributes remain excluded.`);
     if (changes.length && provider.kind !== 'feed') {
       try {await this.cache.update('inventory',provider.name,current => mergeInventory(current,{...inventory,boards:changes}));}

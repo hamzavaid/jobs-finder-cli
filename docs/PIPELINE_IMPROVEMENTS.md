@@ -14,3 +14,6 @@ Added SmartRecruiters PUBLIC-only list/detail APIs with offset pagination, Perso
 
 ## Phase 4 - independent employer discovery
 Public GitHub job lists now supply dynamically extracted board candidates independently of archive indexes; no company registry is shipped. Shared per-search list retrieval avoids duplicate downloads across providers. HTML, Markdown and sitemap link extraction is reusable. Candidates preserve tenant/region, URL, discovery method and observed timestamps; existing validation, resumable cursors, negative expiry and additive merge remain. Cold starts with enough public-list candidates defer archive work and explicitly remain partial. These lists skew toward early-career technology roles; board-wide collection and lexical matching remain occupation-neutral. Fourteen focused tests passed.
+
+## Phase 5 - query-aware scheduling
+Added deterministic bounded board ordering, decayed prior match counts (seven-day exponential decay), company priority, age-based starvation protection and 25% exploration reservation. Up to eight query observations per board are persisted. Added scheduled/refreshed/skipped/blocked counters while retaining cancellation and source cooldowns. Thirteen focused scheduling/pipeline/recovery tests passed.

@@ -173,7 +173,7 @@ export class CacheManager {
   }
   async coordinateRefresh(key,work,onBusy = () => {}) {
     try {return await this.withLock('postings',key+':refresh',() => work(false));}
-    catch (error) {if (!/cache is busy in another process/.test(error.message)) throw error;onBusy();return work(true);}
+    catch (error) {if (['EACCES','EPERM','ENOTDIR'].includes(error.code)) {this.onWarning('Cache refresh lock unavailable; collecting without refresh coordination.');return work(false);}if (!/cache is busy in another process/.test(error.message)) throw error;onBusy();return work(true);}
   }
   async flush() {await Promise.allSettled([...this.pending.values()]);}
   async prune() {

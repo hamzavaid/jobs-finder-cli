@@ -3,7 +3,7 @@ import {dirname} from 'node:path';
 export const fields = [
   'source', 'id', 'title', 'company', 'location', 'workplace', 'employmentType',
   'seniorityLevel', 'postedAt', 'postedText', 'applicantCount',
-  'underTenApplicants', 'verified', 'filterEvidence', 'url', 'salary', 'description', 'datePrecision', 'unconfirmedFilters', 'boardId', 'region', 'providerJobId', 'companyEvidence', 'cacheStatus', 'cacheFetchedAt', 'possibleDuplicateOf'
+  'underTenApplicants', 'verified', 'filterEvidence', 'url', 'salary', 'description', 'datePrecision', 'unconfirmedFilters', 'boardId', 'region', 'providerJobId', 'companyEvidence', 'cacheStatus', 'cacheFetchedAt', 'possibleDuplicateOf', 'canonicalUrl', 'applicationUrl', 'provenance', 'originalRecords', 'attribution', 'exportRestrictions', 'descriptionCompleteness', 'resolutionStatus', 'relevanceScore', 'schemaVersion', 'parserVersion', 'rawContentHash'
 ];
 export function csvCell(value) {
   let s = value == null ? '' : typeof value === 'object' ? JSON.stringify(value) : String(value);
@@ -26,7 +26,7 @@ export function serializeJobs(jobs, format = 'table') {
   if (!jobs.length) return 'No matching jobs found.\n';
   const head = `#    ${short('SITE', 10)} ${short('TITLE', 33)} ${short('COMPANY', 24)} ${short('LOCATION', 25)} ${short('POSTED', 14)} JOB ID`;
   const rows = jobs.map((j, i) =>
-    `${String(i + 1).padEnd(4)} ${short(j.source || 'LinkedIn', 10)} ${short(j.title, 33)} ${short(j.company, 24)} ${short(j.location, 25)} ${short(j.postedText || j.postedAt, 14)} ${terminalText(j.id)}`
+    `${String(i + 1).padEnd(4)} ${short(j.source || 'LinkedIn', 10)} ${short(j.title, 33)} ${short(j.company, 24)} ${short(j.location, 25)} ${short(j.postedText || j.postedAt, 14)} ${terminalText(j.id)}${j.attribution ? `\n     Source: ${terminalText(j.source)} ${terminalText(j.sourceUrl || j.url)}` : ''}`
   );
   const warnings = jobs.some(j => j.unconfirmedFilters?.length)
     ? '\nNote: Some site filters could not be independently verified. See --format json / --strict.\n' : '';

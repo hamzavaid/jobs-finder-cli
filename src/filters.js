@@ -1,3 +1,4 @@
+import {tokenize} from './relevance.js';
 /** Validation and mapping for job-search criteria (industry-agnostic). */
 export const EXPERIENCE = Object.freeze({
   internship: '1', intern: '1', entry: '2', 'entry-level': '2', junior: '2',
@@ -67,6 +68,7 @@ export function normalizeOptions(input) {
   const delay = integerBetween(input.delay ?? 1200, 750, 30000, '--delay');
   if (workplace && remote !== null) throw new Error('Use --workplace or --remote, not both.');
   const search = String(input.search ?? '').trim();
+  if (search && !tokenize(search).length) throw new Error('--search must contain a searchable word or technical term.');
   const company = String(input.company ?? '').trim();
   const location = String(input.location ?? '').trim();
   if (!search && !company && !location) {

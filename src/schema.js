@@ -11,7 +11,7 @@ export function validSourceDate(value) {
 }
 export function normalizeJob(job) {
   const stamp = new Date().toISOString();
-  const normalized = {schemaVersion:JOB_SCHEMA_VERSION,parserVersion:PARSER_VERSION,source:null,provider:job.source || null,id:null,providerJobId:null,boardId:null,region:null,requisitionId:null,title:null,company:null,employer:null,employerIdentity:null,companyEvidence:null,location:null,secondaryLocations:[],url:null,canonicalUrl:job.url||null,applicationUrl:job.applyUrl||job.url||null,
+  const normalized = {schemaVersion:JOB_SCHEMA_VERSION,parserVersion:PARSER_VERSION,source:null,provider:job.source || null,id:null,providerJobId:null,boardId:null,region:null,requisitionId:null,title:null,company:null,employer:null,employerIdentity:null,companyEvidence:job.company ? 'observed' : null,location:null,secondaryLocations:[],url:null,canonicalUrl:job.url||null,applicationUrl:job.applyUrl||job.url||null,
     sourceUrl:null,postedAt:null,updatedAt:null,createdAt:null,datePrecision:null,postedText:null,workplace:null,
     employmentType:null,seniorityLevel:null,salary:null,salaryCurrency:null,salaryPeriod:null,description:null,
     applicantCount:null,underTenApplicants:null,verified:null,verificationStatus:job.verified===true?'verified':job.verified===false?'unverified':'unknown',detailsFetched:false,
@@ -22,9 +22,10 @@ export function normalizeJob(job) {
   if(!normalized.postedAt)normalized.datePrecision=null;
   const salary=normalized.salary;
   if(salary&&typeof salary==='object'&&!Array.isArray(salary)) {
-    const min=salary.min??salary.minValue,max=salary.max??salary.maxValue;
+    const value=salary.value && typeof salary.value === 'object' ? salary.value : salary;
+    const min=value.min??value.minValue??(typeof salary.value === 'number' ? salary.value : undefined),max=value.max??value.maxValue;
     if([min,max].some(v=>v!=null&&(typeof v!=='number'||!Number.isFinite(v)||v<0)) || min!=null&&max!=null&&min>max)normalized.salary=null;
-    else {normalized.salaryCurrency=/^[A-Z]{3}$/.test(salary.currency)?salary.currency:null;const period=String(salary.period||salary.unitText||'').toLowerCase();normalized.salaryPeriod=['hour','day','week','month','year','annual','hourly','monthly','yearly'].includes(period)?period:null;}
+    else {normalized.salaryCurrency=/^[A-Z]{3}$/.test(salary.currency)?salary.currency:null;const period=String(salary.period||salary.unitText||value.unitText||'').toLowerCase();normalized.salaryPeriod=['hour','day','week','month','year','annual','hourly','monthly','yearly'].includes(period)?period:null;}
   }
   normalized.rawContentHash = createHash('sha256').update(JSON.stringify([normalized.title,normalized.company,normalized.description,normalized.location,normalized.workplace,normalized.employmentType,normalized.postedAt,normalized.salary])).digest('hex');
   return normalized;
@@ -58,7 +59,7 @@ export function structuredFields(ld = {}) {
     return a ? [a.addressLocality,a.addressRegion,a.addressCountry?.name || a.addressCountry].filter(x => typeof x === 'string').join(', ') : item.name;
   }).filter(Boolean).join('; ') || null;
   const validDate = validSourceDate(ld.datePosted);
-  return {title:clean(ld.title) || null, company:clean(ld.hiringOrganization?.name) || null,
+  return {title:typeof ld.title === 'string' ? clean(ld.title) || null : null, company:typeof ld.hiringOrganization?.name === 'string' ? clean(ld.hiringOrganization.name) || null : null,
     description:plainText(ld.description), location,
     postedAt:validDate ? ld.datePosted : null,
     datePrecision:validDate ? (ld.datePosted.length === 10 ? 'day' : 'instant') : null,

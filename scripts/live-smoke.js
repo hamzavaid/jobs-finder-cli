@@ -12,7 +12,7 @@ const http = createHttpClient({delayMs:1200,timeoutMs:15000,retries:0});
 const collection = new CollectionManager({http:createApiClient({timeoutMs:10000,retries:0}),maxBoards:3,discoveryOptions:{maxPages:1,maxValidations:3}});
 for (const site of options.websites) {
   try {
-    const result = providers[site].kind === 'ats' ? await collection.find(providers[site],options) : await searchProvider(providers[site],options,http);
+    const result = ['ats','feed'].includes(providers[site].kind) ? await collection.find(providers[site],options) : await searchProvider(providers[site],options,http);
     const valid = result.jobs.every(job => job.source === site && job.id && job.title && job.company && job.url);
     if (!valid) throw new Error('Invalid normalized posting schema.');
     console.log(JSON.stringify({provider:site,status:result.jobs.length ? 'parsed' : 'explicit-no-results',jobs:result.jobs.length,cards:result.stats.cardsSeen,pages:result.stats.pages,partial:result.stats.complete === false,warnings:result.stats.errors?.slice(0,3)}));

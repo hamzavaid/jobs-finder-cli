@@ -190,8 +190,12 @@ Conflicting employers or requisition IDs remain separate.
 
 ## Progress, failures, and cancellation
 
-Interactive terminals show a small changing status line for discovery, cache use,
-board collection, filtering, and completion. Known board totals appear in progress.
+Interactive terminals show a compact live table with one row for every selected
+website, in selection order. Each row retains its own discovery, cache, collection,
+filtering or completion activity. Bars show the visited/total board count when known
+and animate during other work; finished and failed websites stay visible while
+others continue. The final table remains above the results. Very short terminals
+use static tables to avoid overwriting terminal history.
 Animation is disabled in CI and when either output stream is non-interactive.
 Diagnostics distinguish exact-cache hits/miss reasons, prior source coverage, stale
 boards, current refresh/enrichment work and API request counts. A returned result cap

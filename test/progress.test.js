@@ -25,3 +25,31 @@ test('CLI SIGINT aborts an active discovery request and returns exit 130 without
     assert.equal(result.status,130,result.stderr);assert.equal(result.stdout,'');assert.match(result.stderr,/Search canceled/);
   } finally {await rm(root,{recursive:true,force:true});}
 });
+
+test('multiple providers retain independent activities and completed or failed rows', () => {
+  const chunks = [],stderr = {isTTY:true,columns:90,rows:24,write:value => chunks.push(value)},stdout = {isTTY:true,write:() => assert.fail('progress reached stdout')};
+  const progress = new ProgressReporter({stderr,stdout,env:{}});
+  progress.start({search:'Chef',websites:['LinkedIn','Greenhouse','Ashby']});
+  progress.update('Greenhouse','fetching jobs: 25 / 100 boards');
+  progress.update('LinkedIn','3 matching jobs collected');
+  progress.update('Ashby','provider failed');
+  progress.update('Cache','cache warning');progress.draw();
+  const latest = chunks.at(-1);
+  assert.match(latest,/LinkedIn.*\[##########\].*3 matching jobs collected/);
+  assert.match(latest,/Greenhouse.*fetching jobs: 25 \/ 100 boards/);
+  assert.match(latest,/Ashby.*\[!---------\].*provider failed/);
+  assert.ok(latest.indexOf('LinkedIn') < latest.indexOf('Greenhouse'));
+  progress.finish(3,{partial:true});
+  assert.ok(chunks.at(-2).includes('fetching jobs: 25 / 100 boards'));
+  assert.equal(progress.timer,null);
+});
+
+test('narrow terminals and canceled searches keep safe per-provider output and clean up', () => {
+  const chunks = [],stream = {isTTY:true,columns:24,rows:24,write:value => chunks.push(value)};
+  const progress = new ProgressReporter({stderr:stream,stdout:stream,env:{}});
+  progress.start({search:'Chef',websites:['Greenhouse','Lever']});
+  progress.update('Greenhouse','loading\x1b]0;untrusted title\x07');progress.update('Search','canceling');
+  assert.ok(progress.render().every(line => line.length <= 23));progress.close();
+  const final = chunks.at(-1);assert.match(final,/Greenhouse: Canceling/);assert.match(final,/Lever: Canceling/);
+  assert.equal(progress.timer,null);const count = chunks.length;progress.close();assert.equal(chunks.length,count);
+});

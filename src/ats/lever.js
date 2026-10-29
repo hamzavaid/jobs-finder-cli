@@ -27,7 +27,7 @@ export const leverProvider = {
   async enrichJob(board,job,http) {const raw = await http.json(leverUrl(board,{jobId:job.providerJobId}));const full = normalizeLever(raw,board);if (!full || full.id !== job.id) throw new Error('Lever detail identity mismatch.');return {...full,apiDetailsFetched:true};},
   name:'Lever',kind:'ats',domains:['jobs.lever.co','jobs.eu.lever.co'],apiUrl:leverUrl,
   async fetchBoard(board,http,{pages = 5} = {}) {
-    const jobs = new Map();
+    const jobs = new Map();let rejected=0;
     for (let page = 0; page < pages; page++) {
       let data;
       try {data = await http.json(leverUrl(board,{skip:page * 100}));}
@@ -38,11 +38,11 @@ export const leverProvider = {
       if (!Array.isArray(data)) throw new Error('Lever returned an invalid postings array.');
       let fresh = 0;
       for (const raw of data) {
-        const job = normalizeLever(raw,board);
-        if (!job) throw new Error('Lever returned malformed posting records; cache preserved.');
+        let job;try{job = normalizeLever(raw,board);}catch{};
+        if (!job) {rejected++;continue;}
         if (!jobs.has(job.id)) {fresh++; jobs.set(job.id,job);}
       }
-      if (data.length < 100) return {jobs:[...jobs.values()],complete:true,pages:page + 1};
+      if (data.length < 100) return {jobs:[...jobs.values()],complete:!rejected,rejected,reason:rejected?'schema drift: malformed records quarantined':null,pages:page + 1};
       if (!fresh) return {jobs:[...jobs.values()],complete:false,pages:page + 1,reason:'repeated API page'};
     }
     return {jobs:[...jobs.values()],complete:false,pages,reason:'API page limit reached'};

@@ -1,6 +1,6 @@
 import {evaluateJob, normalizeCompany} from './filters.js';
 import {assertPublicHtml} from './http.js';
-import {normalizeJob} from './schema.js';
+import {normalizeJob,validateJob} from './schema.js';
 
 export function assertSearchPage(html, cards, emptyPattern, site) {
   assertPublicHtml(html);
@@ -42,6 +42,7 @@ export async function searchProvider(provider, options, http, onProgress = () =>
         job = normalizeJob({...job, source:provider.name,
           filterEvidence:decision.facetReliant.length ? `${provider.name.toLowerCase()}-facet-unconfirmed` : 'observed-or-unfiltered',
           unconfirmedFilters:decision.facetReliant});
+        if (!validateJob(job).valid) {stats.rejected++;stats.errors.push(`${provider.name}: malformed posting quarantined (schema drift).`);continue;}
         decision.facetReliant.forEach(f => facets.add(f));
         results.set(job.id, job);
         if (results.size >= options.limit) break;

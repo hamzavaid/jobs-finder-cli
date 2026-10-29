@@ -1,4 +1,5 @@
 import {scheduleBoards,observeBoard} from './board-scheduler.js';
+import {PARSER_VERSION} from './schema.js';
 import {CacheManager,CACHE_TTL,stableKey} from './cache.js';
 import {DiscoveryManager,inventoryFingerprint,mergeInventory} from './discovery.js';
 import {createApiClient} from './api-http.js';
@@ -9,7 +10,7 @@ import {mapConcurrent} from './concurrency.js';
 
 export function searchCacheKey(options,provider) {
   const {search,company,location,dateSeconds,remote,workplace,experience,employment,under,verified,limit,pages,sort,details,strict,websites} = options;
-  return stableKey({retrievalVersion:3,provider,search:search.toLowerCase().replace(/\s+/g,' '),company:company.toLowerCase().replace(/\s+/g,' '),location:location.toLowerCase().replace(/\s+/g,' '),dateSeconds,remote,workplace,experience,employment,under,verified,limit,pages,sort,details,strict,websites:[...websites].sort()});
+  return stableKey({retrievalVersion:4,parserVersion:PARSER_VERSION,provider,search:search.toLowerCase().replace(/\s+/g,' '),company:company.toLowerCase().replace(/\s+/g,' '),location:location.toLowerCase().replace(/\s+/g,' '),dateSeconds,remote,workplace,experience,employment,under,verified,limit,pages,sort,details,strict,websites:[...websites].sort()});
 }
 export class CollectionManager {
   constructor({cache,http,signal,report = () => {},now = Date.now,maxBoards = 64,maxEnrichments = 40,discoveryOptions = {}} = {}) {
@@ -46,7 +47,7 @@ export class CollectionManager {
       this.signal?.throwIfAborted();
       let record = cached,dirty = false;
       const contentNeeded = provider.name === 'Greenhouse' && options.details;
-      const fresh = this.cache.fresh(cached) && (!contentNeeded || cached.data.content) && (cached.data.complete || (cached.data.pages || 0) >= options.pages);
+      const fresh = this.cache.fresh(cached) && cached.data.parserVersion === PARSER_VERSION && (!contentNeeded || cached.data.content) && (cached.data.complete || (cached.data.pages || 0) >= options.pages);
       if (fresh) stats.cacheHits++;
       else if (providerBlocked || refreshes >= this.maxBoards || (board.retryAt && Date.parse(board.retryAt) > this.now())) {
         if (!cached || !this.cache.usableStale(cached)) return;
@@ -60,7 +61,7 @@ export class CollectionManager {
           if ([401,403,429].includes(outcome.errorStatus)) {providerBlocked = true;inventory.providerRetryAt = boardRetryAt;}
           stats.pages += outcome.pages;stats.resolutionAttempts = (stats.resolutionAttempts || 0) + (outcome.resolutionAttempts || 0);stats.resolutionSuccesses = (stats.resolutionSuccesses || 0) + (outcome.resolutionSuccesses || 0);
           const fetchedAt = new Date(this.now()).toISOString();
-          const updated = {provider:provider.name,board,jobs:outcome.jobs.map(job => ({...preserveEnrichment(cached?.data.jobs.find(old => old.id === job.id),job),lastObservedAt:fetchedAt})),lastSuccessfulFetchAt:outcome.complete ? fetchedAt : cached?.data.lastSuccessfulFetchAt || cached?.updatedAt || fetchedAt,complete:outcome.complete,pages:outcome.pages,content:contentNeeded,
+          const updated = {parserVersion:PARSER_VERSION,provider:provider.name,board,jobs:outcome.jobs.map(job => ({...preserveEnrichment(cached?.data.jobs.find(old => old.id === job.id),job),lastObservedAt:fetchedAt})),lastSuccessfulFetchAt:outcome.complete ? fetchedAt : cached?.data.lastSuccessfulFetchAt || cached?.updatedAt || fetchedAt,complete:outcome.complete,pages:outcome.pages,content:contentNeeded,
             revision:stableKey(outcome.jobs.map(({fetchedAt,...job}) => job))};
           // A truncated fetch never replaces a complete board inventory.
           if (!outcome.complete && cached) {

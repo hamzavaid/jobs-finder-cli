@@ -28,13 +28,13 @@ export const ashbyProvider = {
   async fetchBoard(board,http) {
     const data = await http.json(ashbyUrl(board));
     if (!data || !Array.isArray(data.jobs)) throw new Error('Ashby returned an invalid jobs payload.');
-    const jobs = [];
+    const jobs = [];let rejected=0;
     for (const raw of data.jobs) {
-      if (raw.isListed === false) continue;
-      const job = normalizeAshby(raw,board);
-      if (!job) throw new Error('Ashby returned malformed posting records; cache preserved.');
+      if (raw?.isListed === false) continue;
+      let job;try{job = normalizeAshby(raw,board);}catch{};
+      if (!job) {rejected++;continue;}
       jobs.push(job);
     }
-    return {jobs,complete:true,pages:1};
+    return {jobs,complete:!rejected,pages:1,rejected,reason:rejected?'schema drift: malformed records quarantined':null};
   }
 };

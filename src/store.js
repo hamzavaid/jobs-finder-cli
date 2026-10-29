@@ -1,3 +1,4 @@
+import {normalizeJob} from './schema.js';
 import {readFile, writeFile, mkdir, rename, open, rm} from 'node:fs/promises';
 import {join, dirname, resolve} from 'node:path';
 import {homedir} from 'node:os';
@@ -57,7 +58,7 @@ export function saveJobs(jobs, path = defaultDbPath()) {
   return current;
 }
 export async function savedJobs(path = defaultDbPath()) {
-  return Object.values((await loadDb(path)).jobs).map(j => ({...j, source:j.source || 'LinkedIn'}));
+  return Object.values((await loadDb(path)).jobs).map(j => normalizeJob({...j, source:j.source || 'LinkedIn'}));
 }
 export async function statsForSaved(path = defaultDbPath(), websites = null) {
   const all = await savedJobs(path);

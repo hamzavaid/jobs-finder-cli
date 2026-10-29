@@ -1,4 +1,4 @@
-import {normalizeJob, clean, plainText} from '../schema.js';
+import {normalizeJob, validateJob, validSourceDate, clean, plainText} from '../schema.js';
 import {normalizeWorkplace} from '../filters.js';
 
 const reserved = new Set(['api','static','assets','_next','css','js','images','img','embed','robots.txt','favicon.ico','sitemap.xml']);
@@ -20,7 +20,7 @@ export function publicLink(value) {
   } catch {return null;}
 }
 export function instant(value) {
-  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}T.*(?:Z|[+-]\d{2}:?\d{2})$/.test(value)) return null;
+  if (!validSourceDate(value) || typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}T.*(?:Z|[+-]\d{2}:?\d{2})$/.test(value)) return null;
   const time = Date.parse(value);
   return Number.isFinite(time) ? new Date(time).toISOString() : null;
 }
@@ -33,10 +33,11 @@ export function posting(source, board, raw, fields) {
   const id = String(raw.id ?? '');
   if (!/^[\w-]{1,128}$/.test(id) || !fields.title || !fields.url) return null;
   const employer = text(raw.company_name) || text(raw.companyName) || text(board.company) || null;
-  return normalizeJob({source, id:`${boardKey(board)}:${id}`, providerJobId:id,
+  const job = normalizeJob({source, id:`${boardKey(board)}:${id}`, providerJobId:id,
     boardId:board.id, region:board.region || 'global',
     company:employer || board.id, companyEvidence:employer ? 'observed' : 'board-identifier',
     ...fields, filterEvidence:'observed-or-unfiltered', unconfirmedFilters:[]});
+  return validateJob(job).valid ? job : null;
 }
 export function observedWorkplace(value, location) {
   return normalizeWorkplace(value) || normalizeWorkplace(location);

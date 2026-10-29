@@ -33,9 +33,9 @@ export const greenhouseProvider = {
   async fetchBoard(board, http, options = {}) {
     const data = await http.json(greenhouseUrl(board,{content:!!options.content}));
     if (!data || !Array.isArray(data.jobs)) throw new Error('Greenhouse returned an invalid jobs payload.');
-    const jobs = data.jobs.map(raw => normalizeGreenhouse(raw,board)).filter(Boolean);
-    if (jobs.length !== data.jobs.length) throw new Error('Greenhouse returned malformed posting records; cache preserved.');
-    return {jobs,complete:true,pages:1};
+    const jobs = data.jobs.map(raw => {try{return normalizeGreenhouse(raw,board);}catch{return null;}}).filter(Boolean);
+    const rejected = data.jobs.length-jobs.length;
+    return {jobs,complete:!rejected,pages:1,rejected,reason:rejected?'schema drift: malformed records quarantined':null};
   },
   async fetchDetail(board, id, http) {
     const data = await http.json(greenhouseUrl(board,{jobId:id}));

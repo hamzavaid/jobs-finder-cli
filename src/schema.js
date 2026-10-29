@@ -1,14 +1,41 @@
+import {createHash} from 'node:crypto';
 import {load} from 'cheerio';
 
 export const clean = value => String(value ?? '').replace(/\s+/g, ' ').trim();
 export const plainText = value => typeof value === 'string' ? clean(load(value).text()) || null : null;
+export const JOB_SCHEMA_VERSION = 2;
+export const PARSER_VERSION = 3;
+export function validSourceDate(value) {
+ if(typeof value!=='string'||!/^\d{4}-\d{2}-\d{2}(?:T.*(?:Z|[+-]\d{2}:?\d{2}))?$/.test(value)||!Number.isFinite(Date.parse(value)))return false;
+ const day=value.slice(0,10);return new Date(Date.parse(day)).toISOString().slice(0,10)===day;
+}
 export function normalizeJob(job) {
-  return {source:null, id:null, title:null, company:null, location:null, url:null,
-    sourceUrl:null, postedAt:null, datePrecision:null, postedText:null, workplace:null,
-    employmentType:null, seniorityLevel:null, salary:null, description:null,
-    applicantCount:null, underTenApplicants:null, verified:null, detailsFetched:false,
-    descriptionCompleteness:job.description ? (job.detailsFetched ? 'complete' : 'partial') : 'title-only',
-    fetchedAt:new Date().toISOString(), ...job};
+  const stamp = new Date().toISOString();
+  const normalized = {schemaVersion:JOB_SCHEMA_VERSION,parserVersion:PARSER_VERSION,source:null,provider:job.source || null,id:null,providerJobId:null,boardId:null,region:null,requisitionId:null,title:null,company:null,employer:null,employerIdentity:null,companyEvidence:null,location:null,secondaryLocations:[],url:null,canonicalUrl:job.url||null,applicationUrl:job.applyUrl||job.url||null,
+    sourceUrl:null,postedAt:null,updatedAt:null,createdAt:null,datePrecision:null,postedText:null,workplace:null,
+    employmentType:null,seniorityLevel:null,salary:null,salaryCurrency:null,salaryPeriod:null,description:null,
+    applicantCount:null,underTenApplicants:null,verified:null,verificationStatus:job.verified===true?'verified':job.verified===false?'unverified':'unknown',detailsFetched:false,
+    descriptionCompleteness:job.description ? (job.detailsFetched ? 'complete' : 'partial') : 'title-only',firstSeenAt:stamp,lastSeenAt:stamp,lastObservedAt:stamp,provenance:job.source?[{source:job.source,url:job.sourceUrl||job.url||null,method:'provider'}]:[],resolutionStatus:job.description&&job.title&&job.company?'complete':'incomplete',cacheStatus:null,fetchedAt:stamp,...job};
+  normalized.employer = normalized.company;
+  normalized.employerIdentity ||= normalized.companyEvidence === 'observed' ? {name:normalized.company,evidence:'observed-name'} : null;
+  for(const key of ['postedAt','updatedAt','createdAt']) if(normalized[key]!=null&&!validSourceDate(normalized[key]))normalized[key]=null;
+  if(!normalized.postedAt)normalized.datePrecision=null;
+  const salary=normalized.salary;
+  if(salary&&typeof salary==='object'&&!Array.isArray(salary)) {
+    const min=salary.min??salary.minValue,max=salary.max??salary.maxValue;
+    if([min,max].some(v=>v!=null&&(typeof v!=='number'||!Number.isFinite(v)||v<0)) || min!=null&&max!=null&&min>max)normalized.salary=null;
+    else {normalized.salaryCurrency=/^[A-Z]{3}$/.test(salary.currency)?salary.currency:null;const period=String(salary.period||salary.unitText||'').toLowerCase();normalized.salaryPeriod=['hour','day','week','month','year','annual','hourly','monthly','yearly'].includes(period)?period:null;}
+  }
+  normalized.rawContentHash = createHash('sha256').update(JSON.stringify([normalized.title,normalized.company,normalized.description,normalized.location,normalized.workplace,normalized.employmentType,normalized.postedAt,normalized.salary])).digest('hex');
+  return normalized;
+}
+export function validateJob(job,{complete=false}={}) {
+ const errors=[];
+ for(const field of ['source','id','title'])if(typeof job?.[field]!=='string'||!job[field].trim())errors.push(field);
+ try {const url=new URL(job?.url);if(url.protocol!=='https:'||url.username||url.password||url.port)errors.push('url');}catch{errors.push('url');}
+ if(complete)for(const field of ['company','description'])if(typeof job?.[field]!=='string'||!job[field].trim())errors.push(field);
+ if(job?.applicantCount!=null&&(!Number.isInteger(job.applicantCount)||job.applicantCount<0))errors.push('applicantCount');
+ return {valid:!errors.length,errors,schemaVersion:JOB_SCHEMA_VERSION};
 }
 export function structuredJobs(html) {
   const $ = load(html || ''), jobs = [];
@@ -30,7 +57,7 @@ export function structuredFields(ld = {}) {
     const a = item.address;
     return a ? [a.addressLocality,a.addressRegion,a.addressCountry?.name || a.addressCountry].filter(x => typeof x === 'string').join(', ') : item.name;
   }).filter(Boolean).join('; ') || null;
-  const validDate = typeof ld.datePosted === 'string' && /^\d{4}-\d{2}-\d{2}(?:T.*)?$/.test(ld.datePosted) && Number.isFinite(Date.parse(ld.datePosted));
+  const validDate = validSourceDate(ld.datePosted);
   return {title:clean(ld.title) || null, company:clean(ld.hiringOrganization?.name) || null,
     description:plainText(ld.description), location,
     postedAt:validDate ? ld.datePosted : null,

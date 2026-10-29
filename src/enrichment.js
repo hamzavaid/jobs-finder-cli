@@ -9,7 +9,7 @@ export async function enrichOnce(provider,board,job,http) {
 export function preserveEnrichment(previous,current) {
   if (!previous) return current;
   // Publication dates and descriptions from detail APIs survive lighter list refreshes.
-  const merged = {...previous,...current};
+  const merged = {...previous,...current,firstSeenAt:previous.firstSeenAt || current.firstSeenAt};
   for (const key of ['description','postedAt','datePrecision','requisitionId']) if (current[key] == null) merged[key] = previous[key] ?? null;
   if (!current.description && previous.description) {
     merged.descriptionCompleteness = previous.descriptionCompleteness;

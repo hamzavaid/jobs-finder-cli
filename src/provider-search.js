@@ -79,7 +79,11 @@ async function collectPages(provider, options, http, onProgress, context) {
   const stats = {pages:0, cardsSeen:0, detailRequests:0, detailCacheHits:0, rejected:0, unknownExcluded:0, facetReliant:[], errors:[],status:'ok',complete:true,httpRequests:0,accessMode:'public-html',unsupportedFilters:['under','verified'].filter(key=>options[key]!=null && htmlFilterSupport[provider.name]?.[key]==='unsupported')};
   stats.filterSupport=htmlFilterSupport[provider.name];
   const transport=http;stats.httpAttempts=transport.attemptMetrics?0:null;stats.httpRetries=transport.attemptMetrics?0:null;
-  http={get:(url,options={})=>{stats.httpRequests++;return transport.get(url,{...options,onAttempt:attempt=>{stats.httpAttempts=(stats.httpAttempts||0)+1;if(attempt.retry)stats.httpRetries=(stats.httpRetries||0)+1;options.onAttempt?.(attempt);}});}};
+  http={get:(url,options={})=>{stats.httpRequests++;return transport.get(url,{...options,beforeRequest:async()=>{
+    await options.beforeRequest?.();
+    const denial=await detailCache?.read('html-policy',`block:${provider.name}`);
+    if(detailCache?.fresh(denial))throw providerError(`${provider.name}: ${denial.data.status} cooldown until ${new Date(denial.data.retryAt).toISOString()}.`,denial.data.status,'PROVIDER_COOLDOWN');
+  },onAttempt:attempt=>{stats.httpAttempts=(stats.httpAttempts||0)+1;if(attempt.retry)stats.httpRetries=(stats.httpRetries||0)+1;options.onAttempt?.(attempt);}});}};
   const visited=new Set(), started=performance.now(),now=context.now||Date.now;
   if(provider.name==='Glassdoor' && options.location) stats.errors.push('Glassdoor: location is evaluated locally; the public search route does not establish geographic coverage.');
   const facets = new Set();

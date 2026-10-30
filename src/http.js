@@ -1,5 +1,6 @@
 import {RequestScheduler} from './concurrency.js';
 import {setTimeout as sleepDelay} from 'node:timers/promises';
+export const ACCESS_COOLDOWN_MS=15*60000;
 /** Per-host serialized, globally bounded public-page HTTP client. */
 export class AccessError extends Error {
   constructor(message, status = 0) {super(message); this.name = 'AccessError'; this.status = status;}
@@ -12,15 +13,22 @@ export function assertPublicHtml(body) {
 export function createHttpClient({delayMs = 1200, timeoutMs = 15000, retries = 2, signal,maxBytes = 16*1024*1024,scheduler = new RequestScheduler({signal}),
   fetchImpl = globalThis.fetch, sleep = ms => sleepDelay(ms,undefined,{signal}), now = Date.now} = {}) {
   if (!Number.isFinite(delayMs) || delayMs < 0 || !Number.isFinite(timeoutMs) || timeoutMs <= 0 || !Number.isInteger(retries) || retries < 0 || retries > 5 || !Number.isFinite(maxBytes) || maxBytes < 1) throw new Error('Invalid HTTP delay, timeout or retry configuration.');
-  const nextAllowed=new Map(),queues=new Map();
+  const nextAllowed=new Map(),queues=new Map(),blocked=new Map();
   const metrics={requests:0,calls:0,retries:0};
-  async function request(url,{onAttempt}={}) {
+  async function request(url,{onAttempt,beforeRequest}={}) {
     signal?.throwIfAborted();
     const host = new URL(url).hostname;
+    const checkBlocked=()=>{
+      const denial=blocked.get(host);if(!denial || denial.retryAt<=now())return;
+      const error=new AccessError(`${host}: access cooldown until ${new Date(denial.retryAt).toISOString()}.`,denial.status);
+      Object.assign(error,{code:'PROVIDER_COOLDOWN',retryAt:denial.retryAt,providerStatus:denial.status===429?'rate_limited':'blocked'});throw error;
+    };
     for (let attempt = 0; attempt <= retries; attempt++) {
+      checkBlocked();
       const wait = Math.max(0, (nextAllowed.get(host)||0) - now());
       if (wait) await sleep(wait);
       signal?.throwIfAborted();
+      checkBlocked();await beforeRequest?.();signal?.throwIfAborted();
       nextAllowed.set(host,now() + delayMs);
       const controller = new AbortController();
       const callerAborted = () => controller.abort(signal.reason);
@@ -65,6 +73,9 @@ export function createHttpClient({delayMs = 1200, timeoutMs = 15000, retries = 2
         await response?.body?.cancel?.().catch(() => {});
         if (signal?.aborted) throw signal.reason;
         const status = error.status || 0;
+        if([401,403,429,999].includes(status) || error instanceof AccessError && /challenge|login|checkpoint|access is restricted/i.test(error.message)) {
+          blocked.set(host,{status,retryAt:Math.max(now()+ACCESS_COOLDOWN_MS,Number.isFinite(error.retryAt)?error.retryAt:0)});
+        }
         const transient = !(error instanceof AccessError) || /timed out/.test(error.message) || [500,502,503,504].includes(status);
         if (!transient || attempt === retries) throw error instanceof AccessError ? error : new AccessError(`Network request failed from ${host}: ${error.message}`);
       } finally {clearTimeout(timer);signal?.removeEventListener('abort',callerAborted);}

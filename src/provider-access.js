@@ -1,7 +1,7 @@
 import robotsParser from 'robots-parser';
-import {AccessError} from './http.js';
+import {AccessError,ACCESS_COOLDOWN_MS} from './http.js';
 
-export const HTML_TTL = Object.freeze({search:10*60000,partial:3*60000,detail:6*3600000,robots:6*3600000,block:15*60000,stale:24*3600000});
+export const HTML_TTL = Object.freeze({search:10*60000,partial:3*60000,detail:6*3600000,robots:6*3600000,block:ACCESS_COOLDOWN_MS,stale:24*3600000});
 export function providerError(message,status,code) {
   const error = new AccessError(message);error.providerStatus=status;error.code=code;return error;
 }

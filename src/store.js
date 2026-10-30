@@ -1,4 +1,5 @@
 import {normalizeJob} from './schema.js';
+import {mergeJobEvidence} from './field-evidence.js';
 import {readFile, writeFile, mkdir, rename, open, rm} from 'node:fs/promises';
 import {join, dirname, resolve} from 'node:path';
 import {homedir} from 'node:os';
@@ -36,7 +37,7 @@ async function persist(jobs, path) {
       if (!job || typeof job.id !== 'string' || !job.id) continue;
       const source = job.source || 'LinkedIn', key = `${source}:${job.id}`;
       const previous = db.jobs[key] || (source === 'LinkedIn' ? db.jobs[job.id] : null) || {};
-      db.jobs[key] = {...previous, ...job, source, savedAt:now};
+      db.jobs[key] = {...mergeJobEvidence({...previous,source},{...job,source}),source,savedAt:now};
       if (source === 'LinkedIn') delete db.jobs[job.id];
       saved++;
     }

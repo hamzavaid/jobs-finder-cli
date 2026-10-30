@@ -28,3 +28,7 @@ test('microdata obeys identity constraints and ambiguous JSON-LD cannot route to
  const ambiguous=parsePosting(`<script type="application/ld+json">${JSON.stringify([entry('11111','Wrong')])}</script><a href="https://jobs.lever.co/example/wrong">Apply</a>`,url);
  assert.equal(ambiguous.identityConflict,true);
 });
+test('URL arrays remain identity evidence and opaque JSON-LD node IDs are not mistaken for URLs',()=>{
+ assert.equal(parsePosting(html({...entry('11111','Wrong'),identifier:undefined,url:['https://employer.example/jobs/11111']}),url).job,null);
+ assert.equal(parsePosting(html({...entry('22222','Chef'),'@id':'urn:uuid:1234'}),url).job?.title,'Chef');
+});

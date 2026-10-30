@@ -3,7 +3,9 @@ export const POSTING_PARSER_VERSION=3;
 function selectPosting(records,canonical) {
  const requested=new URL(canonical),pathId=requested.pathname.split('/').filter(Boolean).at(-1);
  const candidates=records.map(raw=>{
-  const urls=[raw.url,raw['@id'],raw.mainEntityOfPage].map(value=>typeof value==='object'?value?.['@id']||value?.url:value).filter(value=>typeof value==='string' && value.trim());
+  const values=[raw.url,raw.mainEntityOfPage,...(typeof raw['@id']==='string' && /^urn:/i.test(raw['@id'])?[]:[raw['@id']])].flat().filter(value=>value!=null).map(value=>typeof value==='object'?value?.['@id']||value?.url:value).flat();
+  if(values.some(value=>typeof value!=='string'))return {raw,conflict:true};
+  const urls=values.filter(value=>value.trim());
   let identities;try{identities=urls.map(value=>canonicalizeUrl(new URL(value,canonical).toString()));}catch{return {raw,conflict:true};}
   const identifier=typeof raw.identifier==='object'?raw.identifier?.value:raw.identifier;
   // Requisition numbers and URL slugs can legitimately differ. Compare numeric URL IDs only.

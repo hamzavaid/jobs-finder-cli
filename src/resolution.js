@@ -1,10 +1,10 @@
-import robotsParser from 'robots-parser';import {canonicalizeUrl,createPublicHttp} from './public-http.js';import {parsePosting} from './posting-parser.js';import {extractBoard} from './discovery.js';import {CacheManager} from './cache.js';import {greenhouseProvider} from './ats/greenhouse.js';import {leverProvider} from './ats/lever.js';import {ashbyProvider} from './ats/ashby.js';import {smartRecruitersProvider} from './ats/smartrecruiters.js';import {personioProvider} from './ats/personio.js';
+import robotsParser from 'robots-parser';import {canonicalizeUrl,createPublicHttp} from './public-http.js';import {parsePosting,POSTING_PARSER_VERSION} from './posting-parser.js';import {extractBoard} from './discovery.js';import {CacheManager} from './cache.js';import {greenhouseProvider} from './ats/greenhouse.js';import {leverProvider} from './ats/lever.js';import {ashbyProvider} from './ats/ashby.js';import {smartRecruitersProvider} from './ats/smartrecruiters.js';import {personioProvider} from './ats/personio.js';
 const adapters=[greenhouseProvider,leverProvider,ashbyProvider,smartRecruitersProvider,personioProvider];
 export class PostingResolver {
  constructor({http=createPublicHttp(),apiHttp,cache=new CacheManager(),signal}={}){Object.assign(this,{http,apiHttp,cache,signal});this.pending=new Map();this.robots=new Map();}
  async resolve(value,depth=0){if(depth>1)return {status:'unsupported',job:null,error:'Resolution hop budget reached.'};let url;try{url=canonicalizeUrl(value);}catch(error){return {status:'unsupported',job:null,error:error.message};}if(this.pending.has(url))return this.pending.get(url);const work=this.resolveOnce(url,value,depth);this.pending.set(url,work);try{return await work;}finally{this.pending.delete(url);}}
  async resolveOnce(url,discoveryUrl,depth){
-  try {this.signal?.throwIfAborted();const cached=await this.cache.read('resolution',url);if(this.cache.fresh(cached))return {...cached.data,cacheHit:true};
+  try {this.signal?.throwIfAborted();const cached=await this.cache.read('resolution',url);if(this.cache.fresh(cached)&&cached.data.postingParserVersion===POSTING_PARSER_VERSION)return {...cached.data,cacheHit:true};
    let result;
    for(const provider of this.apiHttp?adapters:[]){const board=extractBoard(url,provider);if(!board)continue;const parts=new URL(url).pathname.split('/').filter(Boolean);const index=provider.name==='Greenhouse'?parts.indexOf('jobs')+1:provider.name==='Personio'?parts.indexOf('job')+1:1;const id=parts[index]?.split('-')[0];const fullId=provider.name==='Lever'||provider.name==='Ashby'?parts[1]:id;
     if(provider.fetchDetail&&fullId)result={job:await provider.fetchDetail(board,fullId,this.apiHttp)};
@@ -17,5 +17,5 @@ export class PostingResolver {
    if(result.job)result.job={...result.job,discoveryUrl,resolutionStatus:result.status,provenance:[...(result.job.provenance||[]),{source:'discovery',url:discoveryUrl,method:'posting-resolution'}]};return await this.remember(url,result);
   }catch(error){if(error.name==='AbortError'||this.signal?.aborted)throw error;return this.remember(url,{status:[401,403,429].includes(error.status)?'blocked':'failed',job:null,error:error.message});}
  }
- async remember(url,result){try{await this.cache.put('resolution',url,result,{ttl:result.status==='complete'?6*3600000:15*60000});}catch(error){if(error.name==='AbortError')throw error;result.warning=`Resolution cache unavailable: ${error.message}`;}return result;}
+ async remember(url,result){result.postingParserVersion=POSTING_PARSER_VERSION;try{await this.cache.put('resolution',url,result,{ttl:result.status==='complete'?6*3600000:15*60000});}catch(error){if(error.name==='AbortError')throw error;result.warning=`Resolution cache unavailable: ${error.message}`;}return result;}
 }

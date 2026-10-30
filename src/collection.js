@@ -98,18 +98,6 @@ export class CollectionManager {
       if(cached?.data.parserVersion !== PARSER_VERSION)cached=null;
       this.signal?.throwIfAborted();
       let record = cached,dirty = false;
-      // Employer evidence is independent of the freshness of a lightweight posting list.
-      if(options.company && provider.fetchCompany && !board.company && !cacheOnly && !providerBlocked && !(Date.parse(board.companyRetryAt)>this.now()) && metadataRequests<this.maxBoards) {
-        metadataRequests++;
-        try {board.company=await provider.fetchCompany(board,this.http);board.companyObservedAt=new Date(this.now()).toISOString();board.companyRetryAt=null;}
-        catch(error) {
-          if(error.name==='AbortError')throw error;
-          board.companyRetryAt=error.retryAt || new Date(this.now()+15*60000).toISOString();
-          stats.errors.push(`${provider.name}: ${board.id}: employer metadata unavailable: ${error.message}`);
-          if([401,403,429].includes(error.status)){providerBlocked=true;inventory.providerRetryAt=board.companyRetryAt;}
-        }
-        changes.set(boardKey(board),{...board});
-      }
       const contentNeeded = provider.name === 'Greenhouse' && options.details;
       const fresh = this.cache.fresh(cached) && cached.data.parserVersion === PARSER_VERSION && (!contentNeeded || cached.data.content) && (cached.data.complete || (cached.data.pages || 0) >= options.pages);
       if (fresh) {stats.cacheHits++;stats.postingSnapshotHits++;}
@@ -148,6 +136,21 @@ export class CollectionManager {
         }
       }
       if (!record) return;
+      // Resolve only missing employer evidence, independently of list freshness.
+      const missingEmployer=options.company && provider.fetchCompany && record.data.jobs.some(job=>job.companyEvidence!=='observed');
+      if(missingEmployer && !board.company && !cacheOnly && !providerBlocked && !(Date.parse(board.companyRetryAt)>this.now()) && metadataRequests<this.maxBoards) {
+        metadataRequests++;
+        try {board.company=await provider.fetchCompany(board,this.http);board.companyObservedAt=new Date(this.now()).toISOString();board.companyRetryAt=null;}
+        catch(error) {
+          if(error.name==='AbortError')throw error;
+          board.companyRetryAt=error.retryAt || new Date(this.now()+15*60000).toISOString();
+          stats.errors.push(`${provider.name}: ${board.id}: employer metadata unavailable: ${error.message}`);
+          if([401,403,429].includes(error.status)){providerBlocked=true;inventory.providerRetryAt=board.companyRetryAt;}
+        }
+        const identity=boardKey(board);
+        changes.set(identity,{...(changes.get(identity)||board),company:board.company,companyObservedAt:board.companyObservedAt,companyRetryAt:board.companyRetryAt});
+      }
+      if(missingEmployer && !board.company)stats.employerMetadataUnresolved=(stats.employerMetadataUnresolved||0)+1;
       if(board.company) {
         record.data.jobs=record.data.jobs.map(job=>{
           if(job.companyEvidence!=='board-identifier')return job;
@@ -257,6 +260,7 @@ export class CollectionManager {
       if (this.cache.coordinateRefresh) await this.cache.coordinateRefresh(boardCacheKey,collect,() => stats.errors.push(`${provider.name}: board refresh active in another process; using available cache.`));else await collect();
     },{signal:this.signal});
     stats.timings.collectionMs=performance.now()-collectionStarted;
+    if(stats.employerMetadataUnresolved)stats.errors.push(`${provider.name}: ${stats.employerMetadataUnresolved} boards have unresolved employer metadata (budget, cooldown or unavailable metadata); company coverage is partial.`);
     if (stats.incompleteEvidence) stats.errors.push(`${provider.name}: ${stats.incompleteEvidence} postings lacked complete keyword evidence; coverage is partial.`);
     stats.boardsRefreshed = refreshes;stats.boardsSkipped = boards.length-stats.boardsVisited;stats.boardsBlocked = providerBlocked ? stats.boardsSkipped : 0;
     if (stats.detailRequests >= this.maxEnrichments) stats.errors.push(`${provider.name}: detail request budget reached; unmatched unknown attributes remain excluded.`);

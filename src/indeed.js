@@ -1,6 +1,6 @@
 /** Indeed public HTML reader. Does not impersonate browsers, login, bypass challenges, or use hidden APIs. */
 import {load} from 'cheerio';
-import {normalizeWorkplace} from './filters.js';
+import {normalizeWorkplace,normalizeCompany,knownEmployment,knownExperience} from './filters.js';
 import {searchProvider} from './provider-search.js';
 import {structuredJobs, structuredFields, mergeKnown, normalizeJob,validSourceDate,plainText} from './schema.js';
 import {assertPublicHtml} from './http.js';
@@ -139,14 +139,20 @@ export function parseIndeedObject(job) {
 export function parseIndeedCards(html) {
   assertPublicHtml(html);
   const budget={remaining:20000};
-  const candidates=[MOSAIC,INITIAL].flatMap(marker=>candidateArrays(extractJsonAssignment(html,marker),0,budget).flat().slice(0,2500));
+  const candidates=[MOSAIC,INITIAL].flatMap(marker=>candidateArrays(extractJsonAssignment(html,marker),0,budget).flat().slice(0,5000)).slice(0,5000);
   const rows=candidates.map(parseIndeedObject).filter(Boolean);
   let schemaRejected=candidates.length-rows.length;
-  const structured=new Map(),conflictingIds=new Set();
+  const structured=new Map(),conflictingIds=new Set(),conflictingFields=new Map();
+  const comparable=(key,value)=>key==='employmentType'?knownEmployment(value)||clean(value):key==='seniorityLevel'?knownExperience(value)||clean(value):clean(value).toLowerCase();
   for(const row of rows) {
     const previous=structured.get(row.id);
-    if(previous && ['title','company'].some(key=>clean(previous[key]).toLowerCase()!==clean(row[key]).toLowerCase())) {conflictingIds.add(row.id);schemaRejected++;}
-    else structured.set(row.id,mergeKnown(row,previous||{}));
+    if(previous && (normalizeCompany(previous.company)!==normalizeCompany(row.company) || clean(previous.title).toLowerCase()!==clean(row.title).toLowerCase())) {conflictingIds.add(row.id);schemaRejected++;}
+    else {
+      if(previous)for(const key of ['workplace','employmentType','seniorityLevel','postedAt','location'])if(previous[key] && row[key] && comparable(key,previous[key])!==comparable(key,row[key])) {
+        if(!conflictingFields.has(row.id))conflictingFields.set(row.id,new Set());conflictingFields.get(row.id).add(key);
+      }
+      structured.set(row.id,mergeKnown(row,previous||{}));
+    }
   }
   rows.length=0;rows.push(...structured.values());
   const $ = load(html || '');
@@ -171,6 +177,7 @@ export function parseIndeedCards(html) {
   // Prefer structured records over DOM fallbacks for the same posting.
   const unique = new Map();
   for (const row of rows) if(!conflictingIds.has(row.id))unique.set(row.id,mergeKnown(row,unique.get(row.id)||{}));
+  for(const [id,fields] of conflictingFields)if(unique.has(id))for(const field of fields){unique.get(id)[field]=null;if(field==='postedAt')unique.get(id).datePrecision=null;}
   const result=[...unique.values()];result.schemaRejected=schemaRejected;
   return result;
 }

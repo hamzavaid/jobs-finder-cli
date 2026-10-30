@@ -9,3 +9,7 @@ test('Indeed merges usable independent sources by ID and quarantines conflicting
  assert.equal(records.length,2);assert.equal(records[0].location,'Boston');
  const conflict=parseIndeedCards(page(JSON.stringify({results:[raw]}),{results:[{...raw,company:'Other Employer'}]}));assert.equal(conflict.length,0);assert.ok(conflict.schemaRejected>0);
 });
+test('Indeed structured conflicts leave requested attributes unknown instead of choosing a convenient value',()=>{
+ const result=parseIndeedCards(page(JSON.stringify({results:[{...raw,employmentType:'Full-time',workplaceType:'remote'}]}),{results:[{...raw,employmentType:'Contract',workplaceType:'onsite'}]}));
+ assert.equal(result.length,1);assert.equal(result[0].employmentType,null);assert.equal(result[0].workplace,null);
+});

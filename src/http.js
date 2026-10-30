@@ -1,6 +1,6 @@
 import {RequestScheduler} from './concurrency.js';
 import {setTimeout as sleepDelay} from 'node:timers/promises';
-/** Serialized, bounded public-page HTTP client. Never retries restricted access. */
+/** Per-host serialized, globally bounded public-page HTTP client. */
 export class AccessError extends Error {
   constructor(message, status = 0) {super(message); this.name = 'AccessError'; this.status = status;}
 }
@@ -12,15 +12,15 @@ export function assertPublicHtml(body) {
 export function createHttpClient({delayMs = 1200, timeoutMs = 15000, retries = 2, signal,maxBytes = 16*1024*1024,scheduler = new RequestScheduler({signal}),
   fetchImpl = globalThis.fetch, sleep = ms => sleepDelay(ms,undefined,{signal}), now = Date.now} = {}) {
   if (!Number.isFinite(delayMs) || delayMs < 0 || !Number.isFinite(timeoutMs) || timeoutMs <= 0 || !Number.isInteger(retries) || retries < 0 || retries > 5 || !Number.isFinite(maxBytes) || maxBytes < 1) throw new Error('Invalid HTTP delay, timeout or retry configuration.');
-  let nextAllowed = 0, queue = Promise.resolve();
+  const nextAllowed=new Map(),queues=new Map();
   async function request(url) {
     signal?.throwIfAborted();
     const host = new URL(url).hostname;
     for (let attempt = 0; attempt <= retries; attempt++) {
-      const wait = Math.max(0, nextAllowed - now());
+      const wait = Math.max(0, (nextAllowed.get(host)||0) - now());
       if (wait) await sleep(wait);
       signal?.throwIfAborted();
-      nextAllowed = now() + delayMs;
+      nextAllowed.set(host,now() + delayMs);
       const controller = new AbortController();
       const callerAborted = () => controller.abort(signal.reason);
       signal?.addEventListener('abort',callerAborted,{once:true});
@@ -69,8 +69,10 @@ export function createHttpClient({delayMs = 1200, timeoutMs = 15000, retries = 2
     }
   }
   return {scheduler,get(url) {
-    const result = queue.then(() => scheduler.run(new URL(url).hostname,() => request(url)));
-    queue = result.catch(() => {});
+    const host=new URL(url).hostname;
+    const result = (queues.get(host)||Promise.resolve()).catch(()=>{}).then(() => scheduler.run(host,() => request(url)));
+    queues.set(host,result);
+    result.finally(()=>{if(queues.get(host)===result)queues.delete(host);}).catch(()=>{});
     return result;
   }};
 }

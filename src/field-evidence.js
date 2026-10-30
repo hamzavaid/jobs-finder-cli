@@ -3,7 +3,7 @@ const fields=['title','company','location','workplace','employmentType','seniori
 const known=value=>value!==null && value!==undefined && value!=='';
 const evidence=(job,key)=>job?.fieldEvidence?.[key] || {observedAt:job?.lastObservedAt || job?.fetchedAt || null,source:job?.source || null};
 export function mergeJobEvidence(previous={},current={}) {
- const merged={...previous,...current,firstSeenAt:previous.firstSeenAt || current.firstSeenAt,fieldEvidence:{...previous.fieldEvidence},removedFields:current.removedFields || []};
+ const merged={...previous,...current,firstSeenAt:previous.firstSeenAt || current.firstSeenAt,fieldEvidence:{...previous.fieldEvidence},removedFields:Array.isArray(current.removedFields)?current.removedFields.filter(key=>fields.includes(key)):[]};
  for(const key of fields) {
   const old=evidence(previous,key),fresh=evidence(current,key);
   const older=Number.isFinite(Date.parse(old.observedAt)) && Number.isFinite(Date.parse(fresh.observedAt)) && Date.parse(fresh.observedAt)<Date.parse(old.observedAt);

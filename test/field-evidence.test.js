@@ -13,4 +13,5 @@ test('explicit source removals and complete-description precedence are preserved
  assert.equal(mergeJobEvidence(previous,{description:'Snippet',descriptionCompleteness:'partial'}).description,'Full duties');
  const removed=mergeJobEvidence(previous,{removedFields:['description','postedAt']});
  assert.equal(removed.description,null);assert.equal(removed.descriptionCompleteness,'title-only');assert.equal(removed.postedAt,null);assert.equal(removed.datePrecision,null);
+ assert.equal(mergeJobEvidence(previous,{description:null,removedFields:'description'}).description,'Full duties');
 });

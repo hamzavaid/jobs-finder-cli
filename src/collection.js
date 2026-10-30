@@ -164,7 +164,7 @@ export class CollectionManager {
       // A few no-overlap candidates remain eligible; missing descriptions are uncertain.
       let planned=record.data.jobs.map(job=>{const decision=engine.evaluate(job);return {job,decision,priority:enrichmentPriority(job,decision,options)};});
       const unresolved=planned.filter(item=>item.priority>=0 && item.decision.needsEnrichment);
-      const plausible=unresolved.filter(item=>item.decision.matchedTerms.length || item.decision.unknowns.length || options.details);
+      const plausible=unresolved.filter(item=>item.job.descriptionCompleteness!=='complete' && (item.decision.matchedTerms.length || item.decision.unknowns.length || options.details));
       if (provider.name==='Greenhouse' && plausible.length>3 && !cacheOnly && !providerBlocked && retryDue(enrichment.bulk,this.now()) && stats.bulkAttempts<this.maxBulkEnrichments) {
         const started=performance.now();stats.bulkAttempts++;
         try {

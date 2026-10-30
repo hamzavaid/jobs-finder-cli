@@ -138,9 +138,17 @@ export function parseIndeedObject(job) {
 }
 export function parseIndeedCards(html) {
   assertPublicHtml(html);
-  const obj = extractJsonAssignment(html, MOSAIC) || extractJsonAssignment(html, INITIAL);
-  const candidates=candidateArrays(obj).flat().slice(0,5000),rows = candidates.map(parseIndeedObject).filter(Boolean);
-  const schemaRejected=candidates.length-rows.length;
+  const budget={remaining:20000};
+  const candidates=[MOSAIC,INITIAL].flatMap(marker=>candidateArrays(extractJsonAssignment(html,marker),0,budget).flat().slice(0,2500));
+  const rows=candidates.map(parseIndeedObject).filter(Boolean);
+  let schemaRejected=candidates.length-rows.length;
+  const structured=new Map(),conflictingIds=new Set();
+  for(const row of rows) {
+    const previous=structured.get(row.id);
+    if(previous && ['title','company'].some(key=>clean(previous[key]).toLowerCase()!==clean(row[key]).toLowerCase())) {conflictingIds.add(row.id);schemaRejected++;}
+    else structured.set(row.id,mergeKnown(row,previous||{}));
+  }
+  rows.length=0;rows.push(...structured.values());
   const $ = load(html || '');
   $('[data-jk], a[href*="jk="]').each((_, el) => {
     const element = $(el);
@@ -162,7 +170,7 @@ export function parseIndeedCards(html) {
   });
   // Prefer structured records over DOM fallbacks for the same posting.
   const unique = new Map();
-  for (const row of rows) unique.set(row.id,mergeKnown(row,unique.get(row.id)||{}));
+  for (const row of rows) if(!conflictingIds.has(row.id))unique.set(row.id,mergeKnown(row,unique.get(row.id)||{}));
   const result=[...unique.values()];result.schemaRejected=schemaRejected;
   return result;
 }

@@ -15,7 +15,7 @@ export function postingRevision(jobs) {
 }
 export function searchCacheKey(options,provider) {
   const {search,company,location,dateSeconds,remote,workplace,experience,employment,under,verified,limit,pages,sort,details,strict,websites} = options;
-  return stableKey({retrievalVersion:6,filterVersion:FILTER_VERSION,parserVersion:PARSER_VERSION,provider,search:normalizeText(search),company:normalizeText(company),location:normalizeText(location),dateSeconds,remote,workplace,experience,employment,under,verified,limit,pages,sort,details,strict,websites:[...websites].sort()});
+  return stableKey({retrievalVersion:7,filterVersion:FILTER_VERSION,parserVersion:PARSER_VERSION,provider,search:normalizeText(search),company:normalizeText(company),location:normalizeText(location),dateSeconds,remote,workplace,experience,employment,under,verified,limit,pages,sort,details,strict,websites:[...websites].sort()});
 }
 export class CollectionManager {
   constructor({cache,http,signal,report = () => {},now = Date.now,maxBoards = 64,maxEnrichments = 40,maxBulkEnrichments = 8,discoveryOptions = {}} = {}) {
@@ -88,7 +88,7 @@ export class CollectionManager {
     snapshots = scheduleBoards(snapshots,options,{now:this.now(),budget:this.maxBoards});
     stats.boardsScheduled = Date.parse(inventory.providerRetryAt)>this.now()?0:Math.min(this.maxBoards,boards.filter(board=>!(Date.parse(board.retryAt)>this.now())).length);
     stats.refreshedBoardKeys=[];stats.skippedBoardKeys=[];
-    let refreshes = 0,providerBlocked = Date.parse(inventory.providerRetryAt) > this.now();
+    let refreshes = 0,metadataRequests=0,providerBlocked = Date.parse(inventory.providerRetryAt) > this.now();
     this.report(provider.name,`fetching jobs: 0 / ${boards.length} boards`);
     const collectionStarted=performance.now();
     await mapConcurrent(snapshots,2,async ({board,key:boardCacheKey}) => {
@@ -97,6 +97,18 @@ export class CollectionManager {
       if(cached?.data.parserVersion !== PARSER_VERSION)cached=null;
       this.signal?.throwIfAborted();
       let record = cached,dirty = false;
+      // Employer evidence is independent of the freshness of a lightweight posting list.
+      if(options.company && provider.fetchCompany && !board.company && !cacheOnly && !providerBlocked && !(Date.parse(board.companyRetryAt)>this.now()) && metadataRequests<this.maxBoards) {
+        metadataRequests++;
+        try {board.company=await provider.fetchCompany(board,this.http);board.companyObservedAt=new Date(this.now()).toISOString();board.companyRetryAt=null;}
+        catch(error) {
+          if(error.name==='AbortError')throw error;
+          board.companyRetryAt=error.retryAt || new Date(this.now()+15*60000).toISOString();
+          stats.errors.push(`${provider.name}: ${board.id}: employer metadata unavailable: ${error.message}`);
+          if([401,403,429].includes(error.status)){providerBlocked=true;inventory.providerRetryAt=board.companyRetryAt;}
+        }
+        changes.push({...board});
+      }
       const contentNeeded = provider.name === 'Greenhouse' && options.details;
       const fresh = this.cache.fresh(cached) && cached.data.parserVersion === PARSER_VERSION && (!contentNeeded || cached.data.content) && (cached.data.complete || (cached.data.pages || 0) >= options.pages);
       if (fresh) {stats.cacheHits++;stats.postingSnapshotHits++;}
@@ -106,7 +118,6 @@ export class CollectionManager {
       } else {
         refreshes++;stats.refreshedBoardKeys.push(boardKey(board));
         try {
-          if (options.company && provider.fetchCompany && !board.company) board.company = await provider.fetchCompany(board,this.http);
           const outcome = await provider.fetchBoard(board,this.http,{pages:options.pages,content:contentNeeded,cache:this.cache,signal:this.signal,search:options.search});
           const boardRetryAt = outcome.errorStatus ? outcome.retryAt || new Date(this.now() + 15 * 60000).toISOString() : null;
           if ([401,403,429].includes(outcome.errorStatus)) {providerBlocked = true;inventory.providerRetryAt = boardRetryAt;}
@@ -136,6 +147,14 @@ export class CollectionManager {
         }
       }
       if (!record) return;
+      if(board.company) {
+        record.data.jobs=record.data.jobs.map(job=>{
+          if(job.companyEvidence!=='board-identifier')return job;
+          dirty=true;
+          return {...job,company:board.company,employer:board.company,companyEvidence:'observed',employerIdentity:{name:board.company,evidence:'board-metadata',observedAt:board.companyObservedAt},companyObservedAt:board.companyObservedAt};
+        });
+        if(dirty)record.data.board={...record.data.board,...board};
+      }
       stats.boardsVisited++;
       if (!record.data.complete) stats.partialBoards++;
       const enrichment=record.data.enrichment ||= {details:{}};

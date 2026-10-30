@@ -81,7 +81,7 @@ export class CollectionManager {
     const boards = inventory.boards.filter(board => board.status === 'valid' || board.status === 'pending');
     if (!boards.length) throw new Error(`${provider.name}: no validated boards available${discovery.errors.length ? '; ' + discovery.errors.join(' | ') : '; discovery or validation is incomplete'}.`);
     stats.boardsKnown = boards.length;
-    const engine = new FilterEngine(options,{now:this.now}), results = new Map(),refs = [],changes = [];
+    const engine = new FilterEngine(options,{now:this.now}), results = new Map(),refs = [],changes = new Map();
     const dateEvaluationAt=this.now();let dateValidUntil=dateEvaluationAt+CACHE_TTL.search;
     const evaluate=engine.evaluate.bind(engine);engine.evaluate=job=>{const started=performance.now();try{return evaluate(job);}finally{stats.timings.filteringMs+=performance.now()-started;}};
     let snapshots = boards.map(board => ({board,key:`${provider.name}:${boardKey(board)}${provider.searchScoped ? ":query:"+stableKey(normalizeText(options.search)) : ""}`}));
@@ -108,7 +108,7 @@ export class CollectionManager {
           stats.errors.push(`${provider.name}: ${board.id}: employer metadata unavailable: ${error.message}`);
           if([401,403,429].includes(error.status)){providerBlocked=true;inventory.providerRetryAt=board.companyRetryAt;}
         }
-        changes.push({...board});
+        changes.set(boardKey(board),{...board});
       }
       const contentNeeded = provider.name === 'Greenhouse' && options.details;
       const fresh = this.cache.fresh(cached) && cached.data.parserVersion === PARSER_VERSION && (!contentNeeded || cached.data.content) && (cached.data.complete || (cached.data.pages || 0) >= options.pages);
@@ -134,14 +134,14 @@ export class CollectionManager {
             updated.jobs = [...jobs.values()];updated.revision = postingRevision(updated.jobs);
           }
           record = {data:updated,updatedAt:new Date(this.now()).toISOString(),expiresAt:new Date(this.now() + (provider.cacheTtl || CACHE_TTL.postings)).toISOString()};dirty = true;
-          changes.push({...board,successfulCollections:(board.successfulCollections||0)+1,recentPostingCount:outcome.jobs.filter(job => job.postedAt && this.now()-Date.parse(job.postedAt)<7*86400000).length,status:'valid',lastJobFetchAt:new Date(this.now()).toISOString(),lastValidatedAt:new Date(this.now()).toISOString(),validationAttemptAt:new Date(this.now()).toISOString(),retryAt:boardRetryAt});
+          changes.set(boardKey(board),{...board,successfulCollections:(board.successfulCollections||0)+1,recentPostingCount:outcome.jobs.filter(job => job.postedAt && this.now()-Date.parse(job.postedAt)<7*86400000).length,status:'valid',lastJobFetchAt:new Date(this.now()).toISOString(),lastValidatedAt:new Date(this.now()).toISOString(),validationAttemptAt:new Date(this.now()).toISOString(),retryAt:boardRetryAt});
           if (!outcome.complete) stats.errors.push(`${provider.name}: ${board.id}: partial board (${outcome.reason || 'pagination incomplete'}).`);
         } catch (error) {
           if (error.name === 'AbortError') throw error;
           stats.failedBoards++;
           const invalid = [404,410].includes(error.status);
           if ([401,403,429].includes(error.status)) {providerBlocked = true;inventory.providerRetryAt = error.retryAt || new Date(this.now() + 15 * 60000).toISOString();}
-          changes.push({...board,status:invalid ? 'invalid' : board.status,lastError:error.message,validationAttemptAt:new Date(this.now()).toISOString(),retryAt:error.retryAt || new Date(this.now() + (invalid ? 7 * 86400000 : 15 * 60000)).toISOString()});
+          changes.set(boardKey(board),{...board,status:invalid ? 'invalid' : board.status,lastError:error.message,validationAttemptAt:new Date(this.now()).toISOString(),retryAt:error.retryAt || new Date(this.now() + (invalid ? 7 * 86400000 : 15 * 60000)).toISOString()});
           stats.errors.push(`${provider.name}: ${board.id}: ${error.message}`);
           if (invalid || !cached || !this.cache.usableStale(cached)) return;
           stats.staleBoards++;
@@ -245,9 +245,8 @@ export class CollectionManager {
         catch (error) {if (error.name === 'AbortError') throw error;stats.errors.push(`${provider.name}: board cache write failed: ${error.message}`);}
       }
       if (provider.kind !== 'feed') {
-        const changedIndex = changes.findIndex(item => boardKey(item) === boardKey(board));
-        const observed = observeBoard(changedIndex >= 0 ? changes[changedIndex] : board,options,boardMatches,this.now());
-        if (changedIndex >= 0) changes[changedIndex] = observed;else changes.push(observed);
+        const identity=boardKey(board);
+        changes.set(identity,observeBoard(changes.get(identity) || board,options,boardMatches,this.now()));
       }
       const stale=!this.cache.fresh(record);
       const retention=Date.parse(record.data.lastSuccessfulFetchAt || record.updatedAt)+CACHE_TTL.stale;
@@ -261,8 +260,8 @@ export class CollectionManager {
     if (stats.incompleteEvidence) stats.errors.push(`${provider.name}: ${stats.incompleteEvidence} postings lacked complete keyword evidence; coverage is partial.`);
     stats.boardsRefreshed = refreshes;stats.boardsSkipped = boards.length-stats.boardsVisited;stats.boardsBlocked = providerBlocked ? stats.boardsSkipped : 0;
     if (stats.detailRequests >= this.maxEnrichments) stats.errors.push(`${provider.name}: detail request budget reached; unmatched unknown attributes remain excluded.`);
-    if (changes.length && provider.kind !== 'feed') {
-      try {await this.cache.update('inventory',provider.name,current => mergeInventory(current,{...inventory,boards:changes}));}
+    if (changes.size && provider.kind !== 'feed') {
+      try {await this.cache.update('inventory',provider.name,current => mergeInventory(current,{...inventory,boards:[...changes.values()]}));}
       catch (error) {if (error.name === 'AbortError') throw error;stats.errors.push(`${provider.name}: inventory cache write failed: ${error.message}`);}
     }
     stats.complete = discovery.complete && stats.boardsVisited === boards.length && !stats.staleBoards && !stats.partialBoards && !stats.errors.length;
@@ -272,9 +271,8 @@ export class CollectionManager {
     const jobs = engine.sort([...results.values()].filter(job=>!options.dateSeconds || engine.evaluate(job).match)).slice(0,options.limit);
     stats.coverage={complete:stats.complete,boardsKnown:stats.boardsKnown,boardsVisited:stats.boardsVisited,boardsSkipped:stats.boardsSkipped,staleBoards:stats.staleBoards,partialBoards:stats.partialBoards,acceptedAfterFiltering:stats.acceptedAfterFiltering,refreshedBoardKeys:stats.refreshedBoardKeys,skippedBoardKeys:stats.skippedBoardKeys};
     {
-      const changed = new Map(changes.map(board => [boardKey(board),board]));
       const ttl = Math.max(0,Math.min(stats.complete ? CACHE_TTL.search : CACHE_TTL.partialSearch,dateValidUntil-this.now(),...refs.map(ref=>Date.parse(ref.validUntil)-this.now()),...jobs.map(job => job.expiresAt ? Date.parse(job.expiresAt)-this.now() : CACHE_TTL.search),...jobs.map(job => (Date.parse(job.cacheFetchedAt) || this.now()) + (job.cacheStatus === 'stale' ? CACHE_TTL.stale : sourceTtl) - this.now())));
-      try {await this.cache.put('search',key,{jobs,stats,refs,coverage:stats.coverage,dateValidUntil,parserVersion:PARSER_VERSION,cachePolicyVersion:2,inventoryFingerprint:inventoryFingerprint({...inventory,boards:inventory.boards.map(board => changed.get(boardKey(board)) || board)})},{ttl});}
+      try {await this.cache.put('search',key,{jobs,stats,refs,coverage:stats.coverage,dateValidUntil,parserVersion:PARSER_VERSION,cachePolicyVersion:2,inventoryFingerprint:inventoryFingerprint({...inventory,boards:inventory.boards.map(board => changes.get(boardKey(board)) || board)})},{ttl});}
       catch (error) {if (error.name === 'AbortError') throw error;stats.errors.push(`${provider.name}: search cache write failed: ${error.message}`);}
     }
     stats.complete = stats.complete && !stats.errors.length;

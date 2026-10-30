@@ -31,8 +31,8 @@ export async function searchProvider(provider, options, http, onProgress = () =>
     const compatible=cached?.data.parserVersion===PARSER_VERSION && cached.data.jobs.every(job=>job.source===provider.name && validateJob(job).valid);
     if (compatible && cache.fresh(cached)) {
       context.report?.(provider.name,'exact-search cache hit');
-      const jobs=cached.data.jobs.filter(job=>evaluateJob(job,{...options,provider:provider.name,supportedFacets:[]},now()).match);
-      return {jobs,stats:{...cached.data.stats,exactCacheHit:true,fromCache:true,httpRequests:0,detailRequests:0,detailCacheHits:0,durationMs:performance.now()-started}};
+      const filteringStarted=performance.now(),jobs=cached.data.jobs.filter(job=>evaluateJob(job,{...options,provider:provider.name,supportedFacets:[]},now()).match);
+      return {jobs,stats:{...cached.data.stats,exactCacheHit:true,fromCache:true,pages:0,cardsSeen:0,rejected:cached.data.jobs.length-jobs.length,acceptedAfterFiltering:jobs.length,httpRequests:0,httpAttempts:0,httpRetries:0,timings:{collectionMs:0,filteringMs:performance.now()-filteringStarted},detailRequests:0,detailCacheHits:0,durationMs:performance.now()-started}};
     }
     const cooldown=await safeRead('html-policy',`block:${provider.name}`);
     let result;
@@ -45,7 +45,7 @@ export async function searchProvider(provider, options, http, onProgress = () =>
       if(context.signal?.aborted||error.name==='AbortError') throw error;
       await rememberBlock(error);
       if(compatible && now()-Date.parse(cached.updatedAt)<=HTML_TTL.stale) {
-        return {jobs:cached.data.jobs.filter(job=>evaluateJob(job,{...options,provider:provider.name,supportedFacets:[]},now()).match).map(job=>({...job,cacheStatus:'stale'})),stats:{...cached.data.stats,status:'partial',complete:false,fromCache:true,stale:true,httpRequests:error.searchStats?.httpRequests||0,detailRequests:error.searchStats?.detailRequests||0,durationMs:performance.now()-started,errors:[...cached.data.stats.errors,`${provider.name}: stale cached results; refresh ${failureStatus(error)}: ${error.message}`]}};
+        return {jobs:cached.data.jobs.filter(job=>evaluateJob(job,{...options,provider:provider.name,supportedFacets:[]},now()).match).map(job=>({...job,cacheStatus:'stale'})),stats:{...cached.data.stats,status:'partial',complete:false,fromCache:true,stale:true,httpRequests:error.searchStats?.httpRequests||0,httpAttempts:error.searchStats?.httpAttempts??(error.code==='PROVIDER_COOLDOWN'?0:null),httpRetries:error.searchStats?.httpRetries??null,timings:{collectionMs:performance.now()-started},detailRequests:error.searchStats?.detailRequests||0,durationMs:performance.now()-started,errors:[...cached.data.stats.errors,`${provider.name}: stale cached results; refresh ${failureStatus(error)}: ${error.message}`]}};
       }
       if(['blocked','restricted','rate_limited'].includes(failureStatus(error))&&!error.message.includes('browser:'))error.message+=` Open in your browser: ${provider.searchUrl(options)}`;
       throw error;
@@ -78,7 +78,8 @@ async function collectPages(provider, options, http, onProgress, context) {
   const results = new Map(), seen = new Set();
   const stats = {pages:0, cardsSeen:0, detailRequests:0, detailCacheHits:0, rejected:0, unknownExcluded:0, facetReliant:[], errors:[],status:'ok',complete:true,httpRequests:0,accessMode:'public-html',unsupportedFilters:['under','verified'].filter(key=>options[key]!=null && htmlFilterSupport[provider.name]?.[key]==='unsupported')};
   stats.filterSupport=htmlFilterSupport[provider.name];
-  const transport=http;http={get:(...args)=>{stats.httpRequests++;return transport.get(...args);}};
+  const transport=http;stats.httpAttempts=transport.attemptMetrics?0:null;stats.httpRetries=transport.attemptMetrics?0:null;
+  http={get:(url,options={})=>{stats.httpRequests++;return transport.get(url,{...options,onAttempt:attempt=>{stats.httpAttempts=(stats.httpAttempts||0)+1;if(attempt.retry)stats.httpRetries=(stats.httpRetries||0)+1;options.onAttempt?.(attempt);}});}};
   const visited=new Set(), started=performance.now(),now=context.now||Date.now;
   if(provider.name==='Glassdoor' && options.location) stats.errors.push('Glassdoor: location is evaluated locally; the public search route does not establish geographic coverage.');
   const facets = new Set();
@@ -178,7 +179,7 @@ async function collectPages(provider, options, http, onProgress, context) {
   } catch (error) {
     if(error.name==='AbortError'||context.signal?.aborted) throw error;
     error.providerStatus=failureStatus(error);
-    if (!results.size) {error.searchStats={...stats};throw error;}
+    if (!results.size) {error.searchStats={...stats,timings:{collectionMs:performance.now()-started}};throw error;}
     stats.complete=false;stats.stopError=error;stats.stopStatus=error.providerStatus;
     stats.errors.push(`${provider.name}: partial results; stopped after ${error.message}`);
   }
@@ -186,6 +187,6 @@ async function collectPages(provider, options, http, onProgress, context) {
   if(stats.incompleteKeywords)stats.errors.push(`${provider.name}: ${stats.incompleteKeywords} candidates excluded because keyword evidence remained incomplete.`);
   if(stats.errors.length) stats.complete=false;
   stats.status=stats.complete?(results.size?'ok':'empty'):'partial';
-  stats.durationMs=performance.now()-started;stats.observedAt=new Date(now()).toISOString();stats.jobsAccepted=results.size;stats.acceptedAfterFiltering=results.size;
+  stats.durationMs=performance.now()-started;stats.timings={collectionMs:stats.durationMs};stats.observedAt=new Date(now()).toISOString();stats.jobsAccepted=results.size;stats.acceptedAfterFiltering=results.size;
   return {jobs:[...results.values()], stats};
 }

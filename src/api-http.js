@@ -29,7 +29,7 @@ export function retryAfterMs(value,now = Date.now()) {
 }
 export function createApiClient({retries = 2,random = Math.random,fetchImpl = globalThis.fetch,signal,timeoutMs = 15000,delayMs = 1200,maxBytes = 16 * 1024 * 1024,now = Date.now,sleep = ms => delay(ms,undefined,{signal}),scheduler = new RequestScheduler({signal})} = {}) {
   if (!Number.isInteger(retries) || retries < 0 || retries > 3 || !Number.isFinite(timeoutMs) || timeoutMs <= 0 || !Number.isFinite(delayMs) || delayMs < 0 || !Number.isFinite(maxBytes) || maxBytes < 1) throw new Error('Invalid API HTTP configuration.');
-  const metrics = {requests:0,bytes:0,notModified:0};
+  const metrics = {requests:0,calls:0,retries:0,bytes:0,notModified:0};
   const responseCache = new Map();
   const next = new Map(),cooldown = new Map(),gates = new Map();
   async function reserveStart(host) {
@@ -47,7 +47,7 @@ export function createApiClient({retries = 2,random = Math.random,fetchImpl = gl
     });
     gates.set(host,start);await start;
   }
-  async function attempt(value,{method = 'GET',json = false} = {}) {
+  async function attempt(value,{method = 'GET',json = false,retry=0} = {}) {
     if (!['GET','HEAD'].includes(method)) throw new Error('Public ATS transport permits GET and HEAD only.');
     const url = assertApiUrl(value), host = url.hostname;
     return scheduler.run(host,async () => {
@@ -64,6 +64,7 @@ export function createApiClient({retries = 2,random = Math.random,fetchImpl = gl
         return await Promise.race([(async () => {
           const prior = method === 'GET' ? responseCache.get(url.toString()) : null;
           metrics.requests++;
+          if(retry)metrics.retries++;
           response = await fetchImpl(url.toString(),{method,headers:{...(prior?.etag ? {'If-None-Match':prior.etag} : prior?.modified ? {'If-Modified-Since':prior.modified} : {}),Accept:json ? 'application/json' : 'text/plain,application/json','User-Agent':'jobs-finder-cli/2.0 (public posting APIs and URL indexes)'},signal:controller.signal,redirect:'error'});
           if (response.status === 304 && prior) {metrics.notModified++;await response.body?.cancel?.();return json ? JSON.parse(prior.body) : prior.body;}
           if (!response.ok) {
@@ -106,8 +107,9 @@ export function createApiClient({retries = 2,random = Math.random,fetchImpl = gl
     });
   }
   async function request(value,options) {
+    metrics.calls++;
     for (let retry = 0; retry <= retries; retry++) {
-      try {return await attempt(value,options);}
+      try {return await attempt(value,{...options,retry});}
       catch (error) {
         if (signal?.aborted || error.name === 'AbortError') throw error;
         const transient = error.transient || /timed out/.test(error.message) || [429,500,502,503,504].includes(error.status);

@@ -191,6 +191,7 @@ export async function runCli(argv = process.argv) {
   try {
     await program.parseAsync(argv);
   } catch (error) {
+    if(error.stats)cacheDiagnostics(error.stats,0).forEach(eprint);
     eprint(error.name === 'AbortError' ? 'Search canceled. Completed cache writes were preserved.' : `Error: ${error.message}`);
     process.exitCode = error.name === 'AbortError' ? 130 : 1;
   }

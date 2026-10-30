@@ -43,7 +43,7 @@ export async function findJobs(options, http, context = {}) {
   context.signal?.throwIfAborted();
   for (const {site,outcome,error} of outcomes) {
     if (error) {
-      allErrors.push(error);stats.errors.push(`${site}: ${error.message}`);stats.providers[site] = {status:failureStatus(error),complete:false,error:error.message,code:error.code || (error.status?`HTTP_${error.status}`:null)};continue;
+      allErrors.push(error);stats.errors.push(`${site}: ${error.message}`);stats.providers[site] = {...error.searchStats,status:failureStatus(error),complete:false,error:error.message,code:error.code || (error.status?`HTTP_${error.status}`:null)};continue;
     }
     successfulProviders++;
     stats.errors.push(...(outcome.stats.errors || []));
@@ -53,7 +53,6 @@ export async function findJobs(options, http, context = {}) {
     stats.facetReliant.push(...outcome.stats.facetReliant.map(filter => `${site}:${filter}`));
     providerJobs.push({site,jobs:outcome.jobs});
   }
-  if (!successfulProviders) {const error=new AggregateError(allErrors, `All selected sites failed: ${stats.errors.join(' | ')}`);error.providers=stats.providers;throw error;}
   const merged = providerJobs.flatMap(provider => provider.jobs);
   const duplicateHints = consolidateJobs(merged);
   stats.possibleCrossSourceDuplicates = duplicateHints.possible;stats.identityConflicts = duplicateHints.conflicts;
@@ -61,11 +60,15 @@ export async function findJobs(options, http, context = {}) {
   stats.duplicatesRemoved = duplicateHints.confirmed + outcomes.reduce((sum,item) => sum + (item.outcome?.stats.duplicatesRemoved || 0),0);
   metrics.add('sourcesAttempted',selected.length);metrics.add('sourcesSuccessful',successfulProviders);
   for (const key of ['boardsKnown','boardsVisited','boardsSkipped','boardsRefreshed','boardsBlocked','staleBoards','cacheHits','postingSnapshotHits','exactCacheMisses','bulkAttempts','bulkSuccesses','bulkFailures','bulkCooldownHits','detailRequests','detailCacheHits','detailCooldownHits','acceptedAfterFiltering','completePostings','incompletePostings','schemaRejected','resolutionAttempts','resolutionSuccesses']) metrics.add(key,outcomes.reduce((sum,item)=>sum+(item.outcome?.stats[key]||0),0));
-  if (collection?.http?.metrics) {metrics.add('httpRequests',collection.http.metrics.requests-(initialTransport.requests||0));metrics.add('httpBytes',collection.http.metrics.bytes-(initialTransport.bytes||0));}
-  metrics.add('htmlRequests',outcomes.reduce((sum,item)=>sum+(item.outcome?.stats.httpRequests || item.error?.searchStats?.httpRequests || 0),0));
+  if (collection?.http?.metrics) {metrics.add('httpRequests',collection.http.metrics.requests-(initialTransport.requests||0));metrics.add('apiLogicalCalls',collection.http.metrics.calls-(initialTransport.calls||0));metrics.add('apiRetries',collection.http.metrics.retries-(initialTransport.retries||0));metrics.add('httpBytes',collection.http.metrics.bytes-(initialTransport.bytes||0));}
+  const html=outcomes.filter(item=>!['ats','feed'].includes(providers[item.site]?.kind)).map(item=>item.outcome?.stats || item.error?.searchStats || {httpRequests:0,httpAttempts:0,httpRetries:0});
+  metrics.add('htmlLogicalCalls',html.reduce((sum,item)=>sum+(item.httpRequests||0),0));
+  if(html.every(item=>Number.isFinite(item.httpAttempts)))metrics.add('htmlRequests',html.reduce((sum,item)=>sum+item.httpAttempts,0));
+  if(html.every(item=>Number.isFinite(item.httpRetries)))metrics.add('htmlRetries',html.reduce((sum,item)=>sum+item.httpRetries,0));
   metrics.add('exactCacheHits',stats.exactCacheHits);metrics.add('inventoryCacheHits',outcomes.filter(item=>item.outcome?.stats.inventoryCacheHit).length);
-  stats.timings=Object.fromEntries(['discoveryMs','collectionMs','enrichmentMs','filteringMs','cacheReadMs','cacheWriteMs'].map(key=>[key,outcomes.reduce((sum,item)=>sum+(item.outcome?.stats.timings?.[key]||0),0)]));
+  stats.timings=Object.fromEntries(['discoveryMs','collectionMs','enrichmentMs','filteringMs','cacheReadMs','cacheWriteMs'].map(key=>{const values=outcomes.map(item=>(item.outcome?.stats || item.error?.searchStats)?.timings?.[key]).filter(Number.isFinite);return [key,values.length?values.reduce((sum,value)=>sum+value,0):null];}));
   if(collection?.cache.metrics){stats.timings.cacheReadMs=collection.cache.metrics.readMs-(initialCacheMetrics.readMs||0);stats.timings.cacheWriteMs=collection.cache.metrics.writeMs-(initialCacheMetrics.writeMs||0);}
   stats.metrics=metrics.snapshot();
+  if (!successfulProviders) {const error=new AggregateError(allErrors, `All selected sites failed: ${stats.errors.join(' | ')}`);error.providers=stats.providers;error.stats=stats;throw error;}
   return {jobs:rankJobs(duplicateHints.jobs,options,{now:context.now?.() ?? Date.now()}).slice(0,options.limit),stats};
 }

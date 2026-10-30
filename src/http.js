@@ -13,7 +13,8 @@ export function createHttpClient({delayMs = 1200, timeoutMs = 15000, retries = 2
   fetchImpl = globalThis.fetch, sleep = ms => sleepDelay(ms,undefined,{signal}), now = Date.now} = {}) {
   if (!Number.isFinite(delayMs) || delayMs < 0 || !Number.isFinite(timeoutMs) || timeoutMs <= 0 || !Number.isInteger(retries) || retries < 0 || retries > 5 || !Number.isFinite(maxBytes) || maxBytes < 1) throw new Error('Invalid HTTP delay, timeout or retry configuration.');
   const nextAllowed=new Map(),queues=new Map();
-  async function request(url) {
+  const metrics={requests:0,calls:0,retries:0};
+  async function request(url,{onAttempt}={}) {
     signal?.throwIfAborted();
     const host = new URL(url).hostname;
     for (let attempt = 0; attempt <= retries; attempt++) {
@@ -34,6 +35,8 @@ export function createHttpClient({delayMs = 1200, timeoutMs = 15000, retries = 2
       let response;
       try {
         const operation = (async () => {
+          metrics.requests++;if(attempt)metrics.retries++;
+          onAttempt?.({retry:attempt>0});
           response = await fetchImpl(url, {
             headers: {'Accept':'text/html,application/xhtml+xml', 'Accept-Language':'en-US,en;q=0.8',
               'User-Agent':'jobs-cli/2.0 (public job listings reader; no browser automation)'},
@@ -68,9 +71,10 @@ export function createHttpClient({delayMs = 1200, timeoutMs = 15000, retries = 2
       await sleep(Math.max(delayMs, 1000 * (attempt + 1)));
     }
   }
-  return {scheduler,get(url) {
+  return {scheduler,metrics,attemptMetrics:true,get(url,options) {
+    metrics.calls++;
     const host=new URL(url).hostname;
-    const result = (queues.get(host)||Promise.resolve()).catch(()=>{}).then(() => scheduler.run(host,() => request(url)));
+    const result = (queues.get(host)||Promise.resolve()).catch(()=>{}).then(() => scheduler.run(host,() => request(url,options)));
     queues.set(host,result);
     result.finally(()=>{if(queues.get(host)===result)queues.delete(host);}).catch(()=>{});
     return result;

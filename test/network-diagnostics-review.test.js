@@ -19,3 +19,7 @@ test('HTML failures expose measured attempts and exact cache hits reset transpor
   await findJobs(options,http,{cache});const warm=await findJobs(options,http,{cache});assert.equal(warm.stats.metrics.htmlRequests,0);assert.equal(warm.stats.metrics.htmlLogicalCalls,0);assert.equal(warm.stats.exactCacheHits,1);
  }finally{await rm(root,{recursive:true,force:true});}
 });
+test('custom API collection without attempt instrumentation is labeled unavailable',async()=>{
+ const collection={http:{},cache:{flush:async()=>{}},find:async()=>({jobs:[],stats:{pages:1,cardsSeen:0,rejected:0,detailRequests:0,unknownExcluded:0,facetReliant:[],errors:[]}})};
+ const result=await findJobs(normalizeOptions({website:'Greenhouse',search:'Chef'}),null,{collection});assert.match(cacheDiagnostics(result.stats,0).join('\n'),/unavailable API\/index attempts; 0 public HTML attempts/);
+});

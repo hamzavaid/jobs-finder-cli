@@ -18,7 +18,7 @@ export function cacheDiagnostics(stats,jobsReturned) {
  const m=stats.metrics || {},t=stats.timings || {};
  lines.push(`Cache reuse: ${m.inventoryCacheHits || 0} inventories; ${m.postingSnapshotHits || 0} posting snapshots; ${m.detailCacheHits || 0} complete descriptions; ${m.detailCooldownHits || 0} detail cooldowns.`);
  lines.push(`Enrichment: bulk ${m.bulkAttempts || 0} attempted / ${m.bulkSuccesses || 0} succeeded / ${m.bulkFailures || 0} failed; ${m.detailRequests || 0} individual attempts.`);
- lines.push(`Network requests: ${m.httpRequests ?? 0} API/index attempts; ${m.htmlRequests ?? 'unavailable'} public HTML attempts. Logical calls: ${m.apiLogicalCalls ?? 0} API/index, ${m.htmlLogicalCalls ?? 0} HTML; retries: ${m.apiRetries ?? 'unavailable'} API/index, ${m.htmlRetries ?? 'unavailable'} HTML.`);
+ lines.push(`Network requests: ${m.httpRequests ?? 'unavailable'} API/index attempts; ${m.htmlRequests ?? 'unavailable'} public HTML attempts. Logical calls: ${m.apiLogicalCalls ?? 'unavailable'} API/index, ${m.htmlLogicalCalls ?? 'unavailable'} HTML; retries: ${m.apiRetries ?? 'unavailable'} API/index, ${m.htmlRetries ?? 'unavailable'} HTML.`);
  lines.push(`Jobs returned: ${jobsReturned}; ${m.acceptedAfterFiltering || 0} passed local filtering this run.`);
  const time=key=>Number.isFinite(t[key])?Math.round(t[key]):'unavailable';
  lines.push(`Stage time (ms): discovery ${time('discoveryMs')}, collection ${time('collectionMs')}, enrichment ${time('enrichmentMs')}, filtering ${time('filteringMs')}, cache reads ${time('cacheReadMs')}, cache writes ${time('cacheWriteMs')}.`);

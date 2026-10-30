@@ -14,8 +14,8 @@ export const smartRecruitersProvider={name:'SmartRecruiters',kind:'ats',domains:
  async fetchBoard(board,http,{pages=5}={}) {
   const jobs=new Map();let rejected=0;
   for(let page=0;page<pages;page++) {
-   let data;try{data=await http.json(smartRecruitersUrl(board,{offset:page*100}));}catch(error){if(error.name==='AbortError'||!jobs.size)throw error;return {jobs:[...jobs.values()],pages:page,complete:false,reason:error.message,errorStatus:error.status,retryAt:error.retryAt};}
-   if(!Array.isArray(data?.content))throw new Error('SmartRecruiters schema drift: content array missing.');let fresh=0;
+   let data;try{data=await http.json(smartRecruitersUrl(board,{offset:page*100}));if(!Array.isArray(data?.content))throw new Error('SmartRecruiters schema drift: content array missing.');}catch(error){if(error.name==='AbortError'||!jobs.size)throw error;return {jobs:[...jobs.values()],pages:page,complete:false,reason:error.message,errorStatus:error.status,retryAt:error.retryAt};}
+   let fresh=0;
    for(const raw of data.content){let job;try{job=normalizeSmartRecruiters(raw,board);}catch{}if(!job){rejected++;continue;}if(!jobs.has(job.id)){jobs.set(job.id,job);fresh++;}}
    if(data.content.length<100 || Number.isFinite(data.totalFound)&&page*100+data.content.length>=data.totalFound)return {jobs:[...jobs.values()],pages:page+1,complete:!rejected,reason:rejected?'malformed records quarantined':null};
    if(!fresh)return {jobs:[...jobs.values()],pages:page+1,complete:false,reason:'repeated page'};

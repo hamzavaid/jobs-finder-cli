@@ -30,12 +30,14 @@ export const leverProvider = {
     const jobs = new Map();let rejected=0;
     for (let page = 0; page < pages; page++) {
       let data;
-      try {data = await http.json(leverUrl(board,{skip:page * 100}));}
+      try {
+        data = await http.json(leverUrl(board,{skip:page * 100}));
+        if (!Array.isArray(data)) throw new Error('Lever returned an invalid postings array.');
+      }
       catch (error) {
         if (error.name === 'AbortError' || !jobs.size) throw error;
         return {jobs:[...jobs.values()],complete:false,pages:page,reason:`pagination failed: ${error.message}`,errorStatus:error.status,retryAt:error.retryAt};
       }
-      if (!Array.isArray(data)) throw new Error('Lever returned an invalid postings array.');
       let fresh = 0;
       for (const raw of data) {
         let job;try{job = normalizeLever(raw,board);}catch{};

@@ -12,8 +12,7 @@ function feedProvider(name){return {name,kind:'feed',searchScoped:name==='Himala
  const jobs=new Map();let cursor=null;const seen=new Set();let rejected=0;
  for(let page=0;page<(name==='Remotive'?1:pages);page++){
   const searching=name==='Himalayas' && !!search;const url=new URL(SOURCE_POLICIES[name].url+(searching?'/search':''));if(searching){url.searchParams.set('q',search);url.searchParams.set('page',String(page+1));}else if(name==='Himalayas'){url.searchParams.set('limit','20');if(cursor)url.searchParams.set('cursor',cursor);}
-  let data;try{data=await http.json(url.toString());}catch(error){if(error.name==='AbortError'||!jobs.size)throw error;return {jobs:[...jobs.values()],pages:page,complete:false,reason:error.message,errorStatus:error.status,retryAt:error.retryAt};}
-  if(!Array.isArray(data?.jobs))throw new Error(`${name} schema drift: jobs array missing.`);
+  let data;try{data=await http.json(url.toString());if(!Array.isArray(data?.jobs))throw new Error(`${name} schema drift: jobs array missing.`);}catch(error){if(error.name==='AbortError'||!jobs.size)throw error;return {jobs:[...jobs.values()],pages:page,complete:false,reason:error.message,errorStatus:error.status,retryAt:error.retryAt};}
   const before=jobs.size;
   for(const raw of data.jobs){let job;try{job=normalizeFeed(raw,name);}catch{}if(job)jobs.set(job.id,job);else rejected++;}
   if(searching){if(page>0&&data.jobs.length&&jobs.size===before)return {jobs:[...jobs.values()],pages:page+1,complete:false,reason:'repeated search page'};if(!data.jobs.length || Number.isFinite(data.totalCount) && jobs.size>=data.totalCount)return {jobs:[...jobs.values()],pages:page+1,complete:!rejected,reason:rejected?'malformed records quarantined':null};continue;}

@@ -20,3 +20,8 @@ test('GitHub list adapter accepts only resolved complete postings and preserves 
  const result=await githubProvider.fetchBoard({}, {publicLists:async()=>({documents:[{url:'https://github.com/list',body:'| Employer | Chef | Boston | [apply](https://employer.example/jobs/1) | 1d |'}],errors:[]})},{resolver:{resolve:async()=>({status:'complete',job:{source:'Employer',id:'1',title:'Chef',company:'Kitchen',url:'https://employer.example/jobs/1',description:'Prepare meals'}})}});
  assert.equal(result.jobs[0].source,'GitHub');assert.equal(result.jobs[0].authoritativeSource,'Employer');assert.equal(result.complete,false);
 });
+test('resolver does not follow an unrelated ATS link after conflicting posting metadata',async()=>{
+ let requests=0;
+ const resolver=new PostingResolver({cache,http:{get:async url=>{requests++;return url.endsWith('/robots.txt')?'User-agent: *\nAllow: /':'<script type="application/ld+json">{"@type":"JobPosting","url":"https://employer.example/jobs/other","title":"Wrong Chef"}</script><a href="https://jobs.lever.co/example/wrong">Apply</a>';}}});
+ const result=await resolver.resolve('https://employer.example/jobs/requested');assert.equal(result.job,null);assert.equal(requests,2);
+});

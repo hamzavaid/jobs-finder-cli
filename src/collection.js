@@ -13,9 +13,9 @@ import {mapConcurrent} from './concurrency.js';
 export function postingRevision(jobs) {
  return stableKey(jobs.map(({fetchedAt,firstSeenAt,lastSeenAt,lastObservedAt,cacheFetchedAt,cacheStatus,enrichment,...job}) => job).sort((a,b)=>a.id.localeCompare(b.id)));
 }
-export function searchCacheKey(options,provider,budgets={maxBoards:64,maxEnrichments:40,maxBulkEnrichments:8}) {
+export function searchCacheKey(options,provider,budgets={maxBoards:64,maxEnrichments:40,maxBulkEnrichments:8},providerCacheVersion=0) {
   const {search,company,location,dateSeconds,remote,workplace,experience,employment,under,verified,limit,pages,sort,details,strict} = options;
-  return stableKey({retrievalVersion:8,relevanceVersion:RELEVANCE_VERSION,filterVersion:FILTER_VERSION,parserVersion:PARSER_VERSION,budgets,provider,search:normalizeText(search),company:normalizeText(company),location:normalizeText(location),dateSeconds,remote,workplace,experience,employment,under,verified,limit,pages,sort,details,strict});
+  return stableKey({retrievalVersion:8,relevanceVersion:RELEVANCE_VERSION,filterVersion:FILTER_VERSION,parserVersion:PARSER_VERSION,providerCacheVersion,budgets,provider,search:normalizeText(search),company:normalizeText(company),location:normalizeText(location),dateSeconds,remote,workplace,experience,employment,under,verified,limit,pages,sort,details,strict});
 }
 export class CollectionManager {
   constructor({cache,http,signal,report = () => {},now = Date.now,maxBoards = 64,maxEnrichments = 40,maxBulkEnrichments = 8,discoveryOptions = {}} = {}) {
@@ -26,7 +26,7 @@ export class CollectionManager {
   async lookupExact(provider,options) {
     this.signal?.throwIfAborted();
     const inventory = provider.kind === 'feed' ? feedInventory(provider) : (await this.cache.read('inventory',provider.name))?.data;
-    const key=searchCacheKey(options,provider.name,{maxBoards:this.maxBoards,maxEnrichments:this.maxEnrichments,maxBulkEnrichments:this.maxBulkEnrichments});
+    const key=searchCacheKey(options,provider.name,{maxBoards:this.maxBoards,maxEnrichments:this.maxEnrichments,maxBulkEnrichments:this.maxBulkEnrichments},provider.cacheVersion||0);
     const miss=reason=>({key,inventory,reason});
     if(!inventory)return miss('inventory missing');
     const exact=await this.cache.read('search',key);
@@ -84,7 +84,7 @@ export class CollectionManager {
     const engine = new FilterEngine(options,{now:this.now}), results = new Map(),refs = [],changes = new Map();
     const dateEvaluationAt=this.now();let dateValidUntil=dateEvaluationAt+CACHE_TTL.search;
     const evaluate=engine.evaluate.bind(engine);engine.evaluate=job=>{const started=performance.now();try{return evaluate(job);}finally{stats.timings.filteringMs+=performance.now()-started;}};
-    let snapshots = boards.map(board => ({board,key:`${provider.name}:${boardKey(board)}${provider.searchScoped ? ":query:"+stableKey(normalizeText(options.search)) : ""}`}));
+    let snapshots = boards.map(board => ({board,key:`${provider.name}:${boardKey(board)}${provider.cacheVersion?':parser:'+provider.cacheVersion:''}${provider.searchScoped ? ":query:"+stableKey(normalizeText(options.search)) : ""}`}));
     // Read large posting shards only inside the two-worker loop, never all at once.
     snapshots = scheduleBoards(snapshots,options,{now:this.now(),budget:this.maxBoards});
     stats.boardsScheduled = Date.parse(inventory.providerRetryAt)>this.now()?0:Math.min(this.maxBoards,boards.filter(board=>!(Date.parse(board.retryAt)>this.now())).length);

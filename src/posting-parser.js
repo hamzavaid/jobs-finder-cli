@@ -1,5 +1,5 @@
 import {load} from 'cheerio';import {structuredJobs,structuredFields,normalizeJob,plainText} from './schema.js';import {canonicalizeUrl} from './public-http.js';import {stableKey} from './cache.js';import {extractPublicLinks} from './employer-candidate.js';
-export const POSTING_PARSER_VERSION=2;
+export const POSTING_PARSER_VERSION=3;
 function selectPosting(records,canonical) {
  const requested=new URL(canonical),pathId=requested.pathname.split('/').filter(Boolean).at(-1);
  const candidates=records.map(raw=>{
@@ -18,8 +18,11 @@ function selectPosting(records,canonical) {
 }
 export function parsePosting(html,url,{source='Employer'}={}) {
  const canonical=canonicalizeUrl(url),$=load(html),records=structuredJobs(html),selected=selectPosting(records,canonical);let fields=selected?structuredFields(selected):null;
- if(!records.length){const scoped=$('[itemscope][itemtype="https://schema.org/JobPosting"], [itemscope][itemtype="http://schema.org/JobPosting"]');if(scoped.length===1)fields={title:scoped.find('[itemprop="title"]').text().trim()||null,company:scoped.find('[itemprop="hiringOrganization"]').text().trim()||null,description:plainText(scoped.find('[itemprop="description"]').html())};}
- const atsLinks=extractPublicLinks(html,{base:canonical});if(!fields)return {status:'unsupported',job:null,links:atsLinks};
+ let identityConflict=records.length>0 && !selected;
+ if(!records.length){const micro=$('[itemscope][itemtype="https://schema.org/JobPosting"], [itemscope][itemtype="http://schema.org/JobPosting"]').map((_,node)=>{
+  const scoped=$(node),link=scoped.find('[itemprop="url"]').first();return {url:link.attr('href')||link.attr('content')||null,'@id':scoped.attr('itemid'),title:scoped.find('[itemprop="title"]').text().trim()||null,company:scoped.find('[itemprop="hiringOrganization"]').text().trim()||null,description:plainText(scoped.find('[itemprop="description"]').html())};
+ }).get();fields=selectPosting(micro,canonical);identityConflict=micro.length>0&&!fields;}
+ const atsLinks=extractPublicLinks(html,{base:canonical});if(!fields)return {status:'unsupported',job:null,links:atsLinks,identityConflict};
  const complete=!!(fields.title&&fields.company&&fields.description);const job=normalizeJob({...fields,source,id:stableKey(canonical),url:canonical,canonicalUrl:canonical,sourceUrl:url,discoveryUrl:url,applicationUrl:canonical,companyEvidence:fields.company?'observed':null,descriptionCompleteness:fields.description?'complete':'title-only',resolutionStatus:complete?'complete':'incomplete',provenance:[{source,url:canonical,method:'public-jobposting'}]});
  return {status:job.title?complete?'complete':'incomplete':'unsupported',job:job.title?job:null,links:atsLinks};
 }

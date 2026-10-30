@@ -22,3 +22,9 @@ test('single-job pages without identity remain supported; relative URLs are reso
   assert.equal(parsePosting(html(record),url).job.title,'Chef');
   assert.equal(parsePosting(html({...record,url:'/jobs/22222'}),url).status,'complete');
 });
+test('microdata obeys identity constraints and ambiguous JSON-LD cannot route to unrelated ATS links',()=>{
+ const html='<div itemscope itemtype="https://schema.org/JobPosting"><a itemprop="url" href="/jobs/11111"></a><span itemprop="title">Wrong Chef</span><span itemprop="hiringOrganization">Kitchen</span><div itemprop="description">Duties</div></div>';
+ assert.equal(parsePosting(html,url).job,null);
+ const ambiguous=parsePosting(`<script type="application/ld+json">${JSON.stringify([entry('11111','Wrong')])}</script><a href="https://jobs.lever.co/example/wrong">Apply</a>`,url);
+ assert.equal(ambiguous.identityConflict,true);
+});

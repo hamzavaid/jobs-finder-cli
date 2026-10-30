@@ -1,5 +1,6 @@
 import {extractJobListLeads} from '../employer-candidate.js';import {PostingResolver} from '../resolution.js';import {createPublicHttp} from '../public-http.js';
-export const githubProvider={name:'GitHub',kind:'feed',cacheTtl:6*3600000,async fetchBoard(board,http,{cache,signal,resolver,maxResolutions=8}={}){
+import {POSTING_PARSER_VERSION} from '../posting-parser.js';
+export const githubProvider={name:'GitHub',kind:'feed',cacheVersion:POSTING_PARSER_VERSION,cacheTtl:6*3600000,async fetchBoard(board,http,{cache,signal,resolver,maxResolutions=8}={}){
  if(!http.publicLists)throw new Error('GitHub public-list transport unavailable.');const lists=await http.publicLists();if(!lists.documents.length)throw new Error('GitHub public job lists unavailable.');
  const resolve=resolver||new PostingResolver({apiHttp:http,cache,signal,http:createPublicHttp({signal,scheduler:http.scheduler})});const jobs=[],errors=[];let attempts=0;
  const leads=[...new Set(lists.documents.flatMap(doc=>extractJobListLeads(doc.body,{base:doc.url})))].filter(url=>!['github.com','raw.githubusercontent.com','simplify.jobs','i.imgur.com','camo.githubusercontent.com'].includes(new URL(url).hostname));

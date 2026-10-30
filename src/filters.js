@@ -1,6 +1,6 @@
 import {tokenize} from './relevance.js';
 import {validSourceDate} from './schema.js';
-export const FILTER_VERSION = 2;
+export const FILTER_VERSION = 3;
 /** Validation and mapping for job-search criteria (industry-agnostic). */
 export const EXPERIENCE = Object.freeze({
   internship: '1', intern: '1', entry: '2', 'entry-level': '2', junior: '2',

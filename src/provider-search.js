@@ -6,6 +6,7 @@ import {CacheManager,stableKey} from './cache.js';
 import {assertProviderAccess,allowedHtmlUrl,failureStatus,providerError,HTML_TTL} from './provider-access.js';
 import {htmlFilterSupport} from './provider-filter-map.js';
 import {searchEvidence} from './relevance.js';
+import {mergeJobEvidence} from './field-evidence.js';
 
 export function assertSearchPage(html, cards, emptyPattern, site) {
   assertPublicHtml(html);
@@ -117,7 +118,7 @@ async function collectPages(provider, options, http, onProgress, context) {
         const canExplore=!exploratory || (stats.exploratoryDetails||0)<2;
         if (!card.detailsFetched && canExplore && (options.details || unresolved.length || lexical.needsEnrichment)) {
           const detailKey=`${provider.name}:${card.id}:${PARSER_VERSION}:${FILTER_VERSION}`,cached=await detailCache?.read('html-detail',detailKey);
-          if(detailCache?.fresh(cached) && cached.data.parserVersion===PARSER_VERSION && cached.data.job.id===card.id && cached.data.job.source===provider.name) {job=cached.data.job;stats.detailCacheHits++;}
+          if(detailCache?.fresh(cached) && cached.data.parserVersion===PARSER_VERSION && cached.data.job.id===card.id && cached.data.job.source===provider.name) {job=mergeJobEvidence(cached.data.job,card);stats.detailCacheHits++;}
           else if(stats.detailRequests<25) {
             stats.detailRequests++;
             if(exploratory)stats.exploratoryDetails=(stats.exploratoryDetails||0)+1;

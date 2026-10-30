@@ -1,5 +1,6 @@
 import {CACHE_TTL} from './cache.js';
 import {normalizeJob} from './schema.js';
+import {mergeJobEvidence} from './field-evidence.js';
 const pending = new WeakMap();
 /** Share requests within a transport lifetime without retaining responses indefinitely. */
 export async function enrichOnce(provider,board,job,http) {
@@ -10,15 +11,7 @@ export async function enrichOnce(provider,board,job,http) {
 }
 export function preserveEnrichment(previous,current) {
   if (!previous) return current;
-  // Publication dates and descriptions from detail APIs survive lighter list refreshes.
-  const merged = {...previous,...current,firstSeenAt:previous.firstSeenAt || current.firstSeenAt};
-  for (const key of ['description','postedAt','datePrecision','requisitionId']) if (current[key] == null) merged[key] = previous[key] ?? null;
-  if (previous.description && (!current.description || previous.descriptionCompleteness === 'complete' && current.descriptionCompleteness !== 'complete')) {
-    merged.description = previous.description;
-    merged.descriptionCompleteness = previous.descriptionCompleteness;
-    merged.apiDetailsFetched = previous.apiDetailsFetched;
-  }
-  return normalizeJob(merged);
+  return normalizeJob(mergeJobEvidence(previous,current));
 }
 
 export function enrichmentFailure(error,now) {

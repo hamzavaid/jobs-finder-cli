@@ -85,8 +85,9 @@ Short batches can span multiple searches; discovery completion means the configu
 index pass finished, not that every employer worldwide was found. Failed discovery
 never discards previously valid boards. Temporary failures can use labeled stale data
 for up to seven days. Expired data is not presented as current. Partial-search cache
-hits keep their warnings. Rolling `--date` searches re-evaluate time filters rather
-than reuse potentially outdated exact results.
+hits keep their warnings. Rolling `--date` searches can reuse exact results until
+the next possible date-boundary change, then re-evaluate. Future postings and
+calendar-date uncertainty are included when calculating that deadline.
 
 Small revision manifests validate repeated searches without loading every posting
 snapshot. Unchanged collections renew freshness without rewriting large snapshots.
@@ -141,6 +142,18 @@ jobs find --search "Chef" --website Greenhouse --details --format json -o result
 Unknown attributes are `null`; the CLI never invents applicant counts, verification,
 salary, seniority, or posting dates. Strict mode checks requested criteria, not every
 optional field. It does not guarantee that a vacancy remains open after a cached fetch.
+
+Entry-level keyword searches also recognize clear junior, graduate, new-grad and
+early-career title wording while retaining the occupation terms. Quoted phrases
+still require a literal phrase match. Keywords remain distinct from `--experience`:
+use that filter to exclude explicit seniority contradictions. Population and
+reporting phrases such as “Senior Living Caregiver” and “Assistant to Director”
+do not establish the job holder's rank.
+
+Cached details fill missing information without erasing newer observed card
+attributes. Retained fields carry their original `fieldEvidence` timestamps.
+Greenhouse resolves missing company identities even on fresh posting snapshots;
+existing observed employer names do not require an extra metadata request.
 
 | Provider | Important limits |
 | --- | --- |
@@ -260,6 +273,9 @@ Saved jobs are separate from disposable caches. The saved store defaults to
 overrides it; legacy `LJOBS_DB` remains supported. Source-less legacy rows remain
 LinkedIn, and older unprefixed IDs migrate when resaved. No existing saved data is
 deleted by discovery or search filtering.
+Summary saves retain previously observed descriptions/dates when the new search
+did not expose them. `fieldEvidence` records their original observation times;
+`savedAt` is the time of the upsert, not a new source observation.
 
 ### Source attribution and use
 
@@ -323,6 +339,7 @@ npm run benchmark
 npm run benchmark:cache
 npm run benchmark:html
 npm audit
+node scripts/board-performance.js
 ```
 
 Standard tests use fixtures and mocked responses, including real CLI subprocesses.
@@ -357,6 +374,7 @@ invariants rather than enforcing a machine-dependent subsecond timing threshold.
 See [cache policies, cooldowns and measured comparison](docs/CACHE_PERFORMANCE.md).
 
 Technical details: [pipeline improvements and limitations](docs/PIPELINE_IMPROVEMENTS.md), [architecture and cache schema](docs/ATS_ARCHITECTURE.md),
+[evidence merging, scheduling and hardening](docs/PIPELINE_HARDENING.md),
 [audit and phase log](docs/ATS_PIPELINE_AUDIT.md),
 [validation, performance, and remaining limits](docs/ATS_VALIDATION.md).
 

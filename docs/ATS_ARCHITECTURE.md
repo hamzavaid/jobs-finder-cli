@@ -61,7 +61,7 @@ OS user cache directories are unchanged; `JOBS_CACHE_DIR` is an optional overrid
 | --- | --- |
 | inventory | Additive board identities, validation/query observations, cursors, discovery completeness/cooldowns; no automatic deletion of valid employers |
 | postings | Full query-independent ATS board snapshots; query-scoped Himalayas search snapshots; parser version, capabilities and semantic revision; ATS 20 min, Remotive 6 h, Himalayas 24 h, GitHub 6 h |
-| search | Semantic options/provider selection, parser/policy version, results, historical coverage, authorized revision references and inventory membership fingerprint; complete 10 min / partial 3 min, bounded by source freshness/retention and job expiry; lookup precedes network discovery; rolling date filters always rerun |
+| search | Source-specific semantic options/budgets, parser/filter/relevance/policy versions, results, historical coverage, authorized revision references and inventory membership fingerprint; complete 10 min / partial 3 min, bounded by source freshness/retention, job expiry and the next rolling-date transition; lookup precedes network discovery |
 | manifest | Revision/parser, source observation timestamps and snapshot file identity (size, mtime, ctime, inode); pending markers conservatively invalidate exact reuse during writes; unchanged semantic revisions avoid large snapshot rewrites |
 | resolution | Successful complete postings 6 h; incomplete/blocked/unsupported/failed outcomes 15 min |
 | maintenance | Last successful pruning time; daily lease under a process lock, skipped on exact hits |
@@ -75,3 +75,6 @@ Writes use exclusive temporary files, atomic rename and per-shard locks. Dead-ow
 Coverage is bounded and reported. Neither archive discovery nor public lists enumerate all employers. Generic HTML without trustworthy posting metadata stays unsupported. Shared anonymous API allowances and public access restrictions can still block collection. No SQLite migration, universal HTML selector guessing, persistent HTTP response-body store, or learned ranking model was added without measured need.
 
 Current regression evidence, exact invalidation rules and diagnostic timing definitions: [CACHE_PERFORMANCE.md](CACHE_PERFORMANCE.md).
+
+Current field-level merge policy, posting identity checks, per-host scheduling and
+partial-page recovery: [PIPELINE_HARDENING.md](PIPELINE_HARDENING.md).

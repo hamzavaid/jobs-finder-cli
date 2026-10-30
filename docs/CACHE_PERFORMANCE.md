@@ -22,6 +22,13 @@ The user's 129,081.86 ms / 104-request trace is reported production evidence, no
 ## Cache-first correction
 Exact lookup now precedes discovery and acquires no network resources on a hit. Partial/stale searches use CACHE_TTL.partialSearch (180 seconds), complete searches retain 600 seconds, both bounded by referenced freshness/retention and explicit posting expiry. References carry revisions, stale authorization and expiration boundaries. Parser/policy/filter/membership changes invalidate results; unrelated inventory timestamps do not. Date-filtered searches still re-evaluate their rolling boundaries. File-identity manifests validate shards through stat metadata without parsing postings on normal warm hits, and conservative upgrades validate legacy shards once. Search-level locks recheck cache after acquisition. Focused cache/pipeline/recovery tests: 19 passed.
 
+Current extension (2026-10-29): date-filtered searches cache results only until the
+next possible eligibility transition, including rejected/future candidates. Source
+keys now exclude unrelated provider selections and include effective budgets and
+filter/relevance versions. Board observation bookkeeping uses a keyed Map.
+See [pipeline hardening](PIPELINE_HARDENING.md) for the evidence policy, current
+measurements, HTTP-attempt diagnostics and bounded-contention limitations.
+
 ## Persistent enrichment retry policy
 New failing regressions confirmed bulk requests consuming detail capacity and repeated individual failures across CollectionManager instances. Per-snapshot enrichment metadata now records bulk and source-qualified per-posting detail outcomes. Oversized/unsupported/structural responses cool down for 24 hours; transient failures for five minutes (source Retry-After is honored). Bulk defaults to eight attempts, separate from the existing 40-detail limit. Complete descriptions survive lightweight/partial refreshes. Candidate planning evaluates each record once, prioritizes keyword overlap and unknown supported hard filters, and reserves at most four detail calls for no-overlap exploration. Missing descriptions remain uncertain; unsupported applicant/verification criteria cannot trigger pointless enrichment. Operational retry metadata and query-dependent planning order do not change semantic posting revisions. Focused enrichment/cache regression tests passed.
 
@@ -100,7 +107,7 @@ Verified milestones: `fb8e208` (baseline and intentionally failing reproductions
 ## Remaining limitations
 
 - The under-one-second goal is measured on isolated fixture runs, not guaranteed for every disk, antivirus setup, Node startup, provider combination or machine. Parallel CI load can be slower. The invariant is zero network on a valid immediate repeat.
-- A changed query/filter, expired TTL, changed inventory membership/posting revision, missing/corrupt shard or parser-policy upgrade legitimately causes a miss. Rolling date searches re-evaluate rather than use exact results.
+- A changed query/filter, expired TTL, changed inventory membership/posting revision, missing/corrupt shard or parser-policy upgrade legitimately causes a miss. Rolling date searches reuse exact results only before their next eligibility transition; reaching that boundary triggers re-evaluation.
 - A cold miss may still be expensive and partial. Public archive failures, source restrictions and the 16 MiB safety limit remain; this fix does not claim complete platform coverage or bypass access restrictions.
 - A same-query cold follower waits within the existing two-second process-lock budget; if the owner has not finished, it reports busy rather than duplicating collection. Valid exact hits do not acquire that collection lock.
 - Unwritable caches or oversized exact-result files cannot guarantee persistent reuse; optional cache failures remain visible. No external credentials, setup commands, daemon, paid service or database server are required.

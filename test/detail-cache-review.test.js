@@ -15,3 +15,9 @@ test('cached detail cannot erase a newly observed workplace or replace current c
  assert.equal(result.jobs.length,1);assert.equal(result.jobs[0].workplace,'remote');assert.equal(f.requests(),1);
 });
 export {fixture,card,key};
+test('cached descriptions remain usable after the network exploration allowance is exhausted',async()=>{
+ const cards=['100001','100002','100003'].map(id=>card(id,{title:'Specialist'}));
+ const cached=card('100003',{title:'Specialist',description:'Chef duties',descriptionCompleteness:'complete',detailsFetched:true});
+ const f=fixture(cards,new Map([[key(cached.id),cached]]),job=>({...job,description:null,detailsFetched:false}));
+ const result=await f.run();assert.deepEqual(result.jobs.map(job=>job.id),['100003']);assert.equal(result.stats.detailCacheHits,1);assert.equal(result.stats.detailRequests,2);assert.equal(f.requests(),3);
+});

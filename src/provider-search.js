@@ -116,10 +116,10 @@ async function collectPages(provider, options, http, onProgress, context) {
         const unresolved=[...initial.unknowns,...initial.facetReliant,...(options.strict?initial.inferredFilters:[])];
         const exploratory=!lexical.match && !lexical.matchedTerms.length && !options.details;
         const canExplore=!exploratory || (stats.exploratoryDetails||0)<2;
-        if (!card.detailsFetched && canExplore && (options.details || unresolved.length || lexical.needsEnrichment)) {
+        if (!card.detailsFetched && (options.details || unresolved.length || lexical.needsEnrichment)) {
           const detailKey=`${provider.name}:${card.id}:${PARSER_VERSION}:${FILTER_VERSION}`,cached=await detailCache?.read('html-detail',detailKey);
           if(detailCache?.fresh(cached) && cached.data.parserVersion===PARSER_VERSION && cached.data.job.id===card.id && cached.data.job.source===provider.name) {job=mergeJobEvidence(cached.data.job,card);stats.detailCacheHits++;}
-          else if(stats.detailRequests<25) {
+          else if(canExplore && stats.detailRequests<25) {
             stats.detailRequests++;
             if(exploratory)stats.exploratoryDetails=(stats.exploratoryDetails||0)+1;
             try {
@@ -138,7 +138,7 @@ async function collectPages(provider, options, http, onProgress, context) {
               }
               stats.errors.push(`${provider.name}: incomplete detail ${card.id}: ${error.message}`);job={...card,resolutionStatus:'incomplete'};
             }
-          } else {stats.complete=false;if(!stats.errors.some(error=>error.includes('detail budget')))stats.errors.push(`${provider.name}: detail budget reached.`);}
+          } else if(canExplore) {stats.complete=false;if(!stats.errors.some(error=>error.includes('detail budget')))stats.errors.push(`${provider.name}: detail budget reached.`);}
         }
         const decision = evaluateJob(job, evaluation,now());
         if(!searchEvidence(job,options.search).match) {

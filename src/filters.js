@@ -213,7 +213,10 @@ export function knownExperience(input) {
   return new Set(codes).size===1?codes[0]:null;
 }
 export function titleExperience(value) {
-  const title=String(value||'').normalize('NFKC');
+  // These phrases describe a population or a reporting relationship, not rank.
+  const title=String(value||'').normalize('NFKC')
+    .replace(/\bsenior[- ]+(?:living|care|citizens?|communit(?:y|ies)|services)\b/gi,'')
+    .replace(/\b(?:assistant|support|advisor|adviser)\s+(?:to|for)\s+(?:the\s+)?(?:senior\s+|executive\s+)?(?:director|executive|principal)\b/gi,'');
   const nonEntry=/\b(?:senior|sr\.?|staff|principal|director|executive)\b/i.test(title);
   const signals=[[/\b(?:intern|internship)\b/i,'1'],[/\b(?:junior|jr\.?|entry[- ]level)\b/i,'2'],[/\b(?:senior|sr\.?)\b/i,'4'],[/\bdirector\b/i,'5']].filter(([pattern])=>pattern.test(title)).map(([,code])=>code);
   return {code:new Set(signals).size===1?signals[0]:null,nonEntry};

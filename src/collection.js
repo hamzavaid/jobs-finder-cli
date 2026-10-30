@@ -1,6 +1,6 @@
 import {scheduleBoards,observeBoard} from './board-scheduler.js';
 import {normalizeText} from './relevance.js';
-import {PARSER_VERSION} from './schema.js';
+import {PARSER_VERSION,validSourceDate} from './schema.js';
 import {CacheManager,CACHE_TTL,stableKey} from './cache.js';
 import {DiscoveryManager,inventoryFingerprint,mergeInventory} from './discovery.js';
 import {createApiClient} from './api-http.js';
@@ -28,12 +28,12 @@ export class CollectionManager {
     const inventory = provider.kind === 'feed' ? feedInventory(provider) : (await this.cache.read('inventory',provider.name))?.data;
     const key=searchCacheKey(options,provider.name);
     const miss=reason=>({key,inventory,reason});
-    if(options.dateSeconds)return miss('rolling date filter requires evaluation');
     if(!inventory)return miss('inventory missing');
     const exact=await this.cache.read('search',key);
     if(!exact)return miss('search cache missing or corrupt');
     if(!this.cache.fresh(exact))return miss('search TTL expired');
-    if(exact.data.parserVersion!==PARSER_VERSION || exact.data.cachePolicyVersion!==1)return miss('incompatible parser or cache policy');
+    if(exact.data.parserVersion!==PARSER_VERSION || exact.data.cachePolicyVersion!==2)return miss('incompatible parser or cache policy');
+    if(options.dateSeconds && (!Number.isFinite(exact.data.dateValidUntil) || exact.data.dateValidUntil<=this.now()))return miss('rolling date boundary reached');
     if(exact.data.inventoryFingerprint!==inventoryFingerprint(inventory))return miss('inventory membership changed');
     const validation=await mapConcurrent(exact.data.refs,2,async ref=>{
       this.signal?.throwIfAborted();
@@ -82,6 +82,7 @@ export class CollectionManager {
     if (!boards.length) throw new Error(`${provider.name}: no validated boards available${discovery.errors.length ? '; ' + discovery.errors.join(' | ') : '; discovery or validation is incomplete'}.`);
     stats.boardsKnown = boards.length;
     const engine = new FilterEngine(options,{now:this.now}), results = new Map(),refs = [],changes = [];
+    const dateEvaluationAt=this.now();let dateValidUntil=dateEvaluationAt+CACHE_TTL.search;
     const evaluate=engine.evaluate.bind(engine);engine.evaluate=job=>{const started=performance.now();try{return evaluate(job);}finally{stats.timings.filteringMs+=performance.now()-started;}};
     let snapshots = boards.map(board => ({board,key:`${provider.name}:${boardKey(board)}${provider.searchScoped ? ":query:"+stableKey(normalizeText(options.search)) : ""}`}));
     // Read large posting shards only inside the two-worker loop, never all at once.
@@ -223,6 +224,7 @@ export class CollectionManager {
             }
           }
         }
+        if(options.dateSeconds)dateValidUntil=Math.min(dateValidUntil,nextDateBoundary(job,options.dateSeconds,dateEvaluationAt));
         if (needsContent && decision.failures.includes('search') && job.descriptionCompleteness !== 'complete') stats.incompleteEvidence = (stats.incompleteEvidence || 0) + 1;
         stats[job.descriptionCompleteness === 'complete' ? 'completePostings' : 'incompletePostings'] = (stats[job.descriptionCompleteness === 'complete' ? 'completePostings' : 'incompletePostings'] || 0) + 1;
         enriched.push(job);
@@ -267,12 +269,12 @@ export class CollectionManager {
     if (!stats.complete) stats.errors.push(`${provider.name}: partial coverage (${stats.boardsVisited}/${boards.length} known boards; ${stats.staleBoards} stale).`);
     if (!stats.boardsVisited) throw new Error(`${provider.name}: no board data could be collected. ${stats.errors.slice(0,3).join(' | ')}`);
     this.report(provider.name,'filtering and deduplicating');
-    const jobs = engine.sort([...results.values()]).slice(0,options.limit);
+    const jobs = engine.sort([...results.values()].filter(job=>!options.dateSeconds || engine.evaluate(job).match)).slice(0,options.limit);
     stats.coverage={complete:stats.complete,boardsKnown:stats.boardsKnown,boardsVisited:stats.boardsVisited,boardsSkipped:stats.boardsSkipped,staleBoards:stats.staleBoards,partialBoards:stats.partialBoards,acceptedAfterFiltering:stats.acceptedAfterFiltering,refreshedBoardKeys:stats.refreshedBoardKeys,skippedBoardKeys:stats.skippedBoardKeys};
-    if (!options.dateSeconds) {
+    {
       const changed = new Map(changes.map(board => [boardKey(board),board]));
-      const ttl = Math.max(0,Math.min(stats.complete ? CACHE_TTL.search : CACHE_TTL.partialSearch,...refs.map(ref=>Date.parse(ref.validUntil)-this.now()),...jobs.map(job => job.expiresAt ? Date.parse(job.expiresAt)-this.now() : CACHE_TTL.search),...jobs.map(job => (Date.parse(job.cacheFetchedAt) || this.now()) + (job.cacheStatus === 'stale' ? CACHE_TTL.stale : sourceTtl) - this.now())));
-      try {await this.cache.put('search',key,{jobs,stats,refs,coverage:stats.coverage,parserVersion:PARSER_VERSION,cachePolicyVersion:1,inventoryFingerprint:inventoryFingerprint({...inventory,boards:inventory.boards.map(board => changed.get(boardKey(board)) || board)})},{ttl});}
+      const ttl = Math.max(0,Math.min(stats.complete ? CACHE_TTL.search : CACHE_TTL.partialSearch,dateValidUntil-this.now(),...refs.map(ref=>Date.parse(ref.validUntil)-this.now()),...jobs.map(job => job.expiresAt ? Date.parse(job.expiresAt)-this.now() : CACHE_TTL.search),...jobs.map(job => (Date.parse(job.cacheFetchedAt) || this.now()) + (job.cacheStatus === 'stale' ? CACHE_TTL.stale : sourceTtl) - this.now())));
+      try {await this.cache.put('search',key,{jobs,stats,refs,coverage:stats.coverage,dateValidUntil,parserVersion:PARSER_VERSION,cachePolicyVersion:2,inventoryFingerprint:inventoryFingerprint({...inventory,boards:inventory.boards.map(board => changed.get(boardKey(board)) || board)})},{ttl});}
       catch (error) {if (error.name === 'AbortError') throw error;stats.errors.push(`${provider.name}: search cache write failed: ${error.message}`);}
     }
     stats.complete = stats.complete && !stats.errors.length;
@@ -281,3 +283,11 @@ export class CollectionManager {
 }
 
 function feedInventory(provider) {return {provider:provider.name,boards:[{id:'public-feed',region:'global',status:'valid'}],cursors:{}};}
+// A date match can enter (future/uncertain posting) or leave the rolling window.
+// Include rejected candidates too, so an empty cached result cannot hide new eligibility.
+export function nextDateBoundary(job,seconds,now) {
+ if(!validSourceDate(job.postedAt))return Infinity;
+ const time=Date.parse(job.postedAt),window=seconds*1000;
+ const [entry,exit]=job.datePrecision==='instant'?[time,time+window]:job.datePrecision==='day'?[time+38*3600000,time-14*3600000+window]:[];
+ return Math.min(entry>now?entry:Infinity,exit>=now?exit:Infinity);
+}

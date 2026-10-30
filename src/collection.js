@@ -1,5 +1,5 @@
 import {scheduleBoards,observeBoard} from './board-scheduler.js';
-import {normalizeText} from './relevance.js';
+import {normalizeText,RELEVANCE_VERSION} from './relevance.js';
 import {PARSER_VERSION,validSourceDate} from './schema.js';
 import {CacheManager,CACHE_TTL,stableKey} from './cache.js';
 import {DiscoveryManager,inventoryFingerprint,mergeInventory} from './discovery.js';
@@ -15,7 +15,7 @@ export function postingRevision(jobs) {
 }
 export function searchCacheKey(options,provider,budgets={maxBoards:64,maxEnrichments:40,maxBulkEnrichments:8}) {
   const {search,company,location,dateSeconds,remote,workplace,experience,employment,under,verified,limit,pages,sort,details,strict} = options;
-  return stableKey({retrievalVersion:8,filterVersion:FILTER_VERSION,parserVersion:PARSER_VERSION,budgets,provider,search:normalizeText(search),company:normalizeText(company),location:normalizeText(location),dateSeconds,remote,workplace,experience,employment,under,verified,limit,pages,sort,details,strict});
+  return stableKey({retrievalVersion:8,relevanceVersion:RELEVANCE_VERSION,filterVersion:FILTER_VERSION,parserVersion:PARSER_VERSION,budgets,provider,search:normalizeText(search),company:normalizeText(company),location:normalizeText(location),dateSeconds,remote,workplace,experience,employment,under,verified,limit,pages,sort,details,strict});
 }
 export class CollectionManager {
   constructor({cache,http,signal,report = () => {},now = Date.now,maxBoards = 64,maxEnrichments = 40,maxBulkEnrichments = 8,discoveryOptions = {}} = {}) {

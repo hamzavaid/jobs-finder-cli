@@ -5,7 +5,7 @@ import {PARSER_VERSION} from './schema.js';
 import {CacheManager,stableKey} from './cache.js';
 import {assertProviderAccess,allowedHtmlUrl,failureStatus,providerError,HTML_TTL} from './provider-access.js';
 import {htmlFilterSupport} from './provider-filter-map.js';
-import {searchEvidence} from './relevance.js';
+import {searchEvidence,RELEVANCE_VERSION} from './relevance.js';
 import {mergeJobEvidence} from './field-evidence.js';
 
 export function assertSearchPage(html, cards, emptyPattern, site) {
@@ -24,7 +24,7 @@ export async function searchProvider(provider, options, http, onProgress = () =>
   const safeRead=async(kind,key)=>{try{return await cache?.read(kind,key);}catch(error){cacheWarning(error);return null;}};
   const safePut=async(...args)=>{try{return await cache?.put(...args);}catch(error){cacheWarning(error);}};
   const criteria=Object.fromEntries(Object.entries(options).filter(([key])=>!['websites','website','format','output','save'].includes(key)));
-  const key=stableKey({provider:provider.name,criteria,parserVersion:PARSER_VERSION,filterVersion:FILTER_VERSION,access:'public-html-v1'});
+  const key=stableKey({provider:provider.name,criteria,parserVersion:PARSER_VERSION,filterVersion:FILTER_VERSION,relevanceVersion:RELEVANCE_VERSION,access:'public-html-v1'});
   const run=async()=> {
     context.signal?.throwIfAborted();
     const cached=await safeRead('html-search',key);

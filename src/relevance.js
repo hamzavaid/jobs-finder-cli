@@ -1,5 +1,5 @@
 /** Deterministic lexical retrieval; aliases are equivalents, never fuzzy substrings. */
-export const RELEVANCE_VERSION = 2;
+export const RELEVANCE_VERSION = 3;
 export const DEFAULT_WEIGHTS = Object.freeze({phrase:40,title:25,description:20,aliases:10,freshness:5});
 export const DEFAULT_ALIASES = Object.freeze({rn:'registered nurse',cpa:'certified public accountant',js:'javascript',nodejs:'node.js',dotnet:'.net'});
 const morphology = new Map(Object.entries({engineering:'engineer',engineers:'engineer',developer:'develop',developers:'develop',development:'develop',developing:'develop',analytics:'analyst',analysts:'analyst',accountants:'accountant',nurses:'nurse',chefs:'chef',teachers:'teacher',interns:'intern',internship:'intern'}));
@@ -10,11 +10,26 @@ export function tokenize(value) {
 const root = token => morphology.get(token) || token;
 function expanded(value,aliases) {return tokenize(value).flatMap(token => tokenize(Object.hasOwn(aliases,token) ? aliases[token] : token)).map(root);}
 function contains(haystack,needle) {return needle.length > 0 && haystack.some((_,i) => needle.every((t,j) => haystack[i+j] === t));}
+const entryConcept='@entry-career';
+const entryPhrase=/\b(?:entry[- ]level|early[- ]career|(?:new|recent)[- ](?:grad|graduate)s?)\b/i;
+function queryTerms(tokens) {
+ const terms=[];
+ for(let i=0;i<tokens.length;i++) {
+  if(tokens[i]==='entry'&&tokens[i+1]==='level' || tokens[i]==='early'&&tokens[i+1]==='career' || ['new','recent'].includes(tokens[i])&&['grad','graduate','graduates'].includes(tokens[i+1])) {terms.push(entryConcept);i++;}
+  else terms.push(tokens[i]);
+ }
+ return terms;
+}
 export function relevance(job,query,{now = Date.now(),weights = DEFAULT_WEIGHTS,aliases = DEFAULT_ALIASES} = {}) {
-  const terms = [...new Set(expanded(query,aliases))], title = expanded(job.title,aliases), description = expanded(job.description,aliases);
-  const all = new Set([...title,...description]), matchedTerms = terms.filter(t => all.has(t)), missingTerms = terms.filter(t => !all.has(t));
+  const terms = [...new Set(queryTerms(expanded(query,aliases)))], title = expanded(job.title,aliases), description = expanded(job.description,aliases);
   const quoted = [...String(query || '').matchAll(/"([^"]+)"/g)].map(m => expanded(m[1],aliases));
+  // Exact quoted phrases retain their literal token requirement.
   const phrasesMatch = quoted.every(phrase => contains(title,phrase) || contains(description,phrase));
+  if(terms.includes(entryConcept)) {
+    if(entryPhrase.test(job.title||'') || /\b(?:junior|jr)\b|^graduate\s+(?!(?:school|program|student|research|admission|studies)\b)/i.test(job.title||''))title.push(entryConcept);
+    if(entryPhrase.test(job.description||''))description.push(entryConcept);
+  }
+  const all = new Set([...title,...description]), matchedTerms = terms.filter(t => all.has(t)), missingTerms = terms.filter(t => !all.has(t));
   const complete = job.descriptionCompleteness === 'complete' || (!!job.description && !job.descriptionCompleteness);
   const uncertain = (missingTerms.length > 0 || !phrasesMatch) && !complete;
   const coverage = tokens => terms.length ? terms.filter(t => tokens.includes(t)).length / terms.length : 1;

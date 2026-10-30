@@ -13,9 +13,9 @@ import {mapConcurrent} from './concurrency.js';
 export function postingRevision(jobs) {
  return stableKey(jobs.map(({fetchedAt,firstSeenAt,lastSeenAt,lastObservedAt,cacheFetchedAt,cacheStatus,enrichment,...job}) => job).sort((a,b)=>a.id.localeCompare(b.id)));
 }
-export function searchCacheKey(options,provider) {
-  const {search,company,location,dateSeconds,remote,workplace,experience,employment,under,verified,limit,pages,sort,details,strict,websites} = options;
-  return stableKey({retrievalVersion:7,filterVersion:FILTER_VERSION,parserVersion:PARSER_VERSION,provider,search:normalizeText(search),company:normalizeText(company),location:normalizeText(location),dateSeconds,remote,workplace,experience,employment,under,verified,limit,pages,sort,details,strict,websites:[...websites].sort()});
+export function searchCacheKey(options,provider,budgets={maxBoards:64,maxEnrichments:40,maxBulkEnrichments:8}) {
+  const {search,company,location,dateSeconds,remote,workplace,experience,employment,under,verified,limit,pages,sort,details,strict} = options;
+  return stableKey({retrievalVersion:8,filterVersion:FILTER_VERSION,parserVersion:PARSER_VERSION,budgets,provider,search:normalizeText(search),company:normalizeText(company),location:normalizeText(location),dateSeconds,remote,workplace,experience,employment,under,verified,limit,pages,sort,details,strict});
 }
 export class CollectionManager {
   constructor({cache,http,signal,report = () => {},now = Date.now,maxBoards = 64,maxEnrichments = 40,maxBulkEnrichments = 8,discoveryOptions = {}} = {}) {
@@ -26,7 +26,7 @@ export class CollectionManager {
   async lookupExact(provider,options) {
     this.signal?.throwIfAborted();
     const inventory = provider.kind === 'feed' ? feedInventory(provider) : (await this.cache.read('inventory',provider.name))?.data;
-    const key=searchCacheKey(options,provider.name);
+    const key=searchCacheKey(options,provider.name,{maxBoards:this.maxBoards,maxEnrichments:this.maxEnrichments,maxBulkEnrichments:this.maxBulkEnrichments});
     const miss=reason=>({key,inventory,reason});
     if(!inventory)return miss('inventory missing');
     const exact=await this.cache.read('search',key);

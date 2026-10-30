@@ -116,7 +116,7 @@ async function collectPages(provider, options, http, onProgress, context) {
         const unresolved=[...initial.unknowns,...initial.facetReliant,...(options.strict?initial.inferredFilters:[])];
         const exploratory=!lexical.match && !lexical.matchedTerms.length && !options.details;
         const canExplore=!exploratory || (stats.exploratoryDetails||0)<2;
-        if (!card.detailsFetched && (options.details || unresolved.length || lexical.needsEnrichment)) {
+        if (unresolved.length || !card.detailsFetched && (options.details || lexical.needsEnrichment)) {
           const detailKey=`${provider.name}:${card.id}:${PARSER_VERSION}:${FILTER_VERSION}`,cached=await detailCache?.read('html-detail',detailKey);
           if(detailCache?.fresh(cached) && cached.data.parserVersion===PARSER_VERSION && cached.data.job.id===card.id && cached.data.job.source===provider.name) {job=mergeJobEvidence(cached.data.job,card);stats.detailCacheHits++;}
           else if(canExplore && stats.detailRequests<25) {

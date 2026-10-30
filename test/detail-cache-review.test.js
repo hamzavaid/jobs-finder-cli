@@ -21,3 +21,10 @@ test('cached descriptions remain usable after the network exploration allowance 
  const f=fixture(cards,new Map([[key(cached.id),cached]]),job=>({...job,description:null,detailsFetched:false}));
  const result=await f.run();assert.deepEqual(result.jobs.map(job=>job.id),['100003']);assert.equal(result.stats.detailCacheHits,1);assert.equal(result.stats.detailRequests,2);assert.equal(f.requests(),3);
 });
+test('complete descriptions do not suppress requests for unresolved filter metadata',async()=>{
+ const job=card('100001',{description:'Prepare meals',descriptionCompleteness:'complete',detailsFetched:true});
+ const f=fixture([job],new Map(),current=>({...current,seniorityLevel:'Entry level'}));
+ const result=await f.run({experience:'entry'});assert.equal(result.jobs.length,1);assert.equal(result.stats.detailRequests,1);
+ const known=fixture([{...job,seniorityLevel:'Entry level'}],new Map());
+ assert.equal((await known.run({experience:'entry'})).stats.detailRequests,0);
+});

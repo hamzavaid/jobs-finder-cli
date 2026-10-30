@@ -14,7 +14,8 @@ export class FilterEngine {
     const hardFilterStatus = !result.failures.length && !result.unknowns.length && !result.facetReliant.length;
     if (!lexical.match) result.failures.push('search');
     result.match = hardFilterStatus && lexical.match;
-    return {...result,relevanceScore:lexical.score,matchedTerms:lexical.matchedTerms,missingTerms:lexical.missingTerms,hardFilterStatus,uncertainty:lexical.uncertainty,needsEnrichment:lexical.needsEnrichment};
+    const metadataMissing=!result.failures.some(field=>field!=='search') && result.unknowns.some(field=>!['under','verified'].includes(field));
+    return {...result,relevanceScore:lexical.score,matchedTerms:lexical.matchedTerms,missingTerms:lexical.missingTerms,hardFilterStatus,uncertainty:lexical.uncertainty,needsEnrichment:lexical.needsEnrichment || metadataMissing};
   }
   sort(jobs) {
     return rankJobs(jobs,this.options,{now:this.now()});
